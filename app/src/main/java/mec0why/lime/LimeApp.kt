@@ -1,7 +1,12 @@
 package mec0why.lime
 
 import android.app.Application
+import android.os.Build
 import android.util.Log
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import mec0why.lime.data.api.KickApi
@@ -16,11 +21,6 @@ import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
-import coil.ImageLoader
-import coil.ImageLoaderFactory
-import coil.decode.GifDecoder
-import coil.decode.ImageDecoderDecoder
-import android.os.Build
 
 class LimeApp : Application(), ImageLoaderFactory {
 

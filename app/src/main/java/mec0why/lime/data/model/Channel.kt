@@ -1,7 +1,72 @@
 package mec0why.lime.data.model
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+
+object VerifiedSerializer : KSerializer<Boolean> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("Verified", PrimitiveKind.BOOLEAN)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        val input = decoder as? JsonDecoder ?: return false
+        return try {
+            val element = input.decodeJsonElement()
+            when (element) {
+                is JsonPrimitive -> {
+                    if (element.isString) {
+                        element.content.lowercase() == "true" || element.content == "1"
+                    } else {
+                        element.booleanOrNull ?: (element.content == "1")
+                    }
+                }
+                is JsonObject -> true
+                else -> false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Boolean) {
+        encoder.encodeBoolean(value)
+    }
+}
+
+object LiveStatusSerializer : KSerializer<Boolean> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LiveStatus", PrimitiveKind.BOOLEAN)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        val input = decoder as? JsonDecoder ?: return false
+        return try {
+            val element = input.decodeJsonElement()
+            when (element) {
+                is JsonPrimitive -> {
+                    if (element.isString) {
+                        element.content.lowercase() == "true" || element.content == "1"
+                    } else {
+                        element.booleanOrNull ?: (element.content == "1")
+                    }
+                }
+                else -> false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Boolean) {
+        encoder.encodeBoolean(value)
+    }
+}
 
 @Serializable
 data class ChannelResponse(
@@ -11,7 +76,7 @@ data class ChannelResponse(
     @SerialName("user") val user: ChannelUser? = null,
     @SerialName("playback_url") val playbackUrl: String? = null,
     @SerialName("livestream") val livestream: ChannelLivestream? = null,
-    val verified: Boolean = false,
+    @Serializable(with = VerifiedSerializer::class) val verified: Boolean = false,
     @SerialName("recent_categories") val recentCategories: List<RecentCategory> = emptyList(),
     @SerialName("chatroom") val chatroom: Chatroom? = null
 )
@@ -40,7 +105,8 @@ data class ChannelLivestream(
     @SerialName("viewer_count") val viewerCount: Int = 0,
     @SerialName("created_at") val createdAt: String = "",
     val categories: List<RecentCategory> = emptyList(),
-    @SerialName("is_mature") val isMature: Boolean = false
+    @SerialName("is_mature") val isMature: Boolean = false,
+    @Serializable(with = LiveStatusSerializer::class) @SerialName("is_live") val isLive: Boolean = false
 )
 
 @Serializable
@@ -56,6 +122,13 @@ data class SearchChannel(
     val id: Int = 0,
     val slug: String = "",
     val user: SearchUser? = null,
+    @SerialName("livestream") val livestream: ChannelLivestream? = null,
+    @Serializable(with = LiveStatusSerializer::class) @SerialName("isLive") val isLive: Boolean = false,
+    @Serializable(with = LiveStatusSerializer::class) @SerialName("is_live_now") val isLiveNow: Boolean = false,
+    @SerialName("live_stream") val liveStream: ChannelLivestream? = null,
+    @SerialName("indexing") val indexing: Boolean = false,
+    @SerialName("is_subscribed") val isSubscribed: Boolean = false,
+    @Serializable(with = VerifiedSerializer::class) val verified: Boolean = false
 )
 
 @Serializable
@@ -71,7 +144,9 @@ data class SearchUser(
     @SerialName("profile_pic") val profilePicOld: String? = null,
     @SerialName("profile_picture") val profilePicture: String? = null,
     @SerialName("profile_image") val profileImage: String? = null,
-    val profilepic: String? = null
+    val profilepic: String? = null,
+    @Serializable(with = LiveStatusSerializer::class) @SerialName("is_live") val isLive: Boolean = false,
+    @Serializable(with = VerifiedSerializer::class) @SerialName("verified") val verified: Boolean = false
 ) {
     val avatarUrl: String? get() = profilePic ?: profilePicOld ?: profilePicture ?: profileImage ?: profilepic
 }

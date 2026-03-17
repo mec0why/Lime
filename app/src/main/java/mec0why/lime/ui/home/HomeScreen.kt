@@ -32,7 +32,7 @@ fun HomeScreen(
     val error by viewModel.error.collectAsState()
 
     PullToRefreshBox(
-        isRefreshing = isLoading,
+        isRefreshing = isLoading && livestreams.isNotEmpty(),
         onRefresh = viewModel::loadLivestreams,
         modifier = modifier.fillMaxSize()
     ) {

@@ -7,10 +7,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -29,9 +29,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import mec0why.lime.ui.search.SearchScreen
 import mec0why.lime.ui.channel.ChannelScreen
 import mec0why.lime.ui.home.HomeScreen
+import mec0why.lime.ui.search.SearchScreen
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.DarkSurface
 import mec0why.lime.ui.theme.LimeGreen

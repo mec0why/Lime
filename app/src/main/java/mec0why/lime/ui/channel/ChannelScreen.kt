@@ -3,42 +3,37 @@ package mec0why.lime.ui.channel
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.view.View
 import androidx.activity.compose.BackHandler
-import kotlinx.coroutines.delay
 import androidx.annotation.OptIn
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import androidx.media3.common.Player
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.unit.times
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -49,13 +44,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,7 +69,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.LimeGreen
 import mec0why.lime.ui.theme.LiveRed
@@ -103,9 +98,11 @@ fun ChannelScreen(
     val activity = LocalContext.current as? Activity
 
     var isFullscreen by remember { mutableStateOf(false) }
-    var showControls by remember { mutableStateOf(false) }
+    var showControls by remember { mutableStateOf(true) }
     var showChatOverlay by remember { mutableStateOf(true) }
     var isClosing by remember { mutableStateOf(false) }
+    var chatWidthFraction by remember { mutableStateOf(0.35f) }
+    var isResizing by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val exoPlayer = remember {
@@ -181,8 +178,9 @@ fun ChannelScreen(
         }
     }
 
-    if (isFullscreen && playbackUrl != null && !isClosing) {
-        var chatWidthFraction by remember { mutableStateOf(0.35f) }
+    val isLive = !playbackUrl.isNullOrBlank() && channel?.livestream != null
+
+    if (isFullscreen && !isClosing) {
         val screenWidthPx = with(LocalDensity.current) { configuration.screenWidthDp.dp.toPx() }
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -196,18 +194,42 @@ fun ChannelScreen(
                         detectTapGestures { showControls = !showControls }
                     }
                 ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                player = exoPlayer
-                                useController = false
+                    if (isLive) {
+                        AndroidView(
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    player = exoPlayer
+                                    useController = false
+                                }
+                            },
+                            update = { view ->
+                                view.player = exoPlayer
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LiveTv,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(
+                                    text = "Stream is currently offline",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
                             }
-                        },
-                        update = { view ->
-                            view.player = exoPlayer
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        }
+                    }
 
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showControls,
@@ -232,18 +254,20 @@ fun ChannelScreen(
                                 )
                             }
 
-                            IconButton(
-                                onClick = {
-                                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                },
-                                modifier = Modifier.align(Alignment.Center)
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                    contentDescription = "Play/Pause",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(64.dp)
-                                )
+                            if (isLive) {
+                                IconButton(
+                                    onClick = {
+                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    },
+                                    modifier = Modifier.align(Alignment.Center)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                        contentDescription = "Play/Pause",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                }
                             }
 
                             Row(
@@ -252,20 +276,22 @@ fun ChannelScreen(
                                     .padding(8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        playbackUrl?.let { url ->
-                                            exoPlayer.setMediaItem(MediaItem.fromUri(url))
-                                            exoPlayer.prepare()
-                                            exoPlayer.play()
+                                if (isLive) {
+                                    IconButton(
+                                        onClick = {
+                                            playbackUrl?.let { url ->
+                                                exoPlayer.setMediaItem(MediaItem.fromUri(url))
+                                                exoPlayer.prepare()
+                                                exoPlayer.play()
+                                            }
                                         }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Refresh,
+                                            contentDescription = "Refresh",
+                                            tint = Color.White
+                                        )
                                     }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Refresh,
-                                        contentDescription = "Refresh",
-                                        tint = Color.White
-                                    )
                                 }
 
                                 IconButton(
@@ -311,12 +337,9 @@ fun ChannelScreen(
                 }
             }
 
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showChatOverlay && showControls,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
+            if (showChatOverlay) {
                 val boundaryX = screenWidth * (1f - chatWidthFraction)
+
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -325,7 +348,12 @@ fun ChannelScreen(
                         .zIndex(2f)
                         .pointerInput(screenWidthPx) {
                             detectHorizontalDragGestures(
-                                onDragStart = { showControls = true },
+                                onDragStart = { 
+                                    isResizing = true
+                                    showControls = true 
+                                },
+                                onDragEnd = { isResizing = false },
+                                onDragCancel = { isResizing = false },
                                 onHorizontalDrag = { change, dragAmount ->
                                     showControls = true
                                     change.consume()
@@ -335,12 +363,18 @@ fun ChannelScreen(
                             )
                         }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(width = 4.dp, height = 48.dp)
-                            .background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
-                    )
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showControls || isResizing,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 4.dp, height = 48.dp)
+                                .background(LimeGreen, RoundedCornerShape(2.dp))
+                        )
+                    }
                 }
             }
         }
@@ -387,21 +421,10 @@ fun ChannelScreen(
                             .background(Color.Black)
                     ) {
                         when {
-                            isLoading -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        color = LimeGreen,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
-                            }
                             isClosing -> {
                                 Box(modifier = Modifier.fillMaxSize().background(Color.Black))
                             }
-                            playbackUrl != null && !isClosing -> {
+                            isLive && !isClosing -> {
                                 Box(modifier = Modifier
                                     .fillMaxSize()
                                     .pointerInput(Unit) {
@@ -495,17 +518,47 @@ fun ChannelScreen(
                                     modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "Stream offline",
-                                        color = TextSecondary,
-                                        style = MaterialTheme.typography.titleMedium
-                                    )
+                                    IconButton(
+                                        onClick = handleBack,
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = Color.White
+                                        )
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LiveTv,
+                                            contentDescription = null,
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(48.dp)
+                                        )
+                                        Text(
+                                            text = "Stream is currently offline",
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
 
-                    androidx.compose.animation.AnimatedVisibility(visible = showControls || channel?.livestream == null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showControls || channel?.livestream == null,
+                        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+                    ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)

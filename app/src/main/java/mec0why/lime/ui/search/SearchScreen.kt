@@ -37,7 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import mec0why.lime.data.model.SearchChannel
+import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.DarkSurfaceVariant
+import mec0why.lime.ui.theme.LimeGreen
+import mec0why.lime.ui.theme.LiveRed
 import mec0why.lime.ui.theme.TextPrimary
 import mec0why.lime.ui.theme.TextSecondary
 
@@ -156,12 +159,38 @@ fun SearchChannelItem(
         
         Spacer(modifier = Modifier.width(16.dp))
         
-        Column {
-            Text(
-                text = channel.user?.username ?: channel.slug,
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary
-            )
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = channel.user?.username ?: channel.slug,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary
+                )
+                if (channel.verified || channel.user?.verified == true) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(LimeGreen, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "✓",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DarkBackground
+                        )
+                    }
+                }
+            }
+            val isLive = channel.isLive || channel.isLiveNow || channel.livestream != null || 
+                        channel.liveStream != null || channel.user?.isLive == true ||
+                        channel.livestream?.isLive == true || channel.liveStream?.isLive == true
+            if (isLive) {
+                Text(
+                    text = "● LIVE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LiveRed
+                )
+            }
         }
     }
 }

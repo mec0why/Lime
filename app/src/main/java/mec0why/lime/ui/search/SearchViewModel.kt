@@ -3,6 +3,7 @@ package mec0why.lime.ui.search
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         _searchQuery.value = query
         searchJob?.cancel()
         
-        if (query.isBlank()) {
+        if (query.length < 3) {
             _channels.value = emptyList()
             _error.value = null
             _isLoading.value = false
@@ -55,7 +56,9 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 _isLoading.value = false
             },
             onFailure = { exception ->
-                _error.value = exception.message
+                if (exception !is CancellationException) {
+                    _error.value = exception.message
+                }
                 _isLoading.value = false
             }
         )

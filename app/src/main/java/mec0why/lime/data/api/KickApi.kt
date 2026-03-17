@@ -3,7 +3,6 @@ package mec0why.lime.data.api
 import mec0why.lime.data.model.ChannelResponse
 import mec0why.lime.data.model.LivestreamResponse
 import mec0why.lime.data.model.OfficialCategoriesResponse
-import mec0why.lime.data.model.SearchChannel
 import mec0why.lime.data.model.SearchResponse
 import retrofit2.http.GET
 import retrofit2.http.Path

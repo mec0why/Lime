@@ -6,15 +6,11 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import mec0why.lime.data.model.ChatMessageEvent
 import mec0why.lime.data.model.PusherEvent
-import mec0why.lime.data.model.PusherSubscribeData
-import mec0why.lime.data.model.PusherSubscribeEvent
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -63,7 +59,6 @@ class ChatViewModel : ViewModel() {
                 try {
                     val pusherEvent = json.decodeFromString<PusherEvent>(text)
                     if (pusherEvent.event == "App\\Events\\ChatMessageEvent" && pusherEvent.data != null) {
-                        // In valid ChatMessageEvents, data is a JSON string containing the message details
                         val dataString = try {
                             pusherEvent.data.jsonPrimitive.contentOrNull ?: pusherEvent.data.toString()
                         } catch (e: Exception) {
