@@ -1,6 +1,5 @@
 package mec0why.lime.ui.channel
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +38,6 @@ class ChatViewModel : ViewModel() {
 
     fun connect(chatroomId: Int) {
         if (currentChatroomId == chatroomId) return
-        Log.d("ChatVM", "Connecting to chatroom: $chatroomId")
         disconnect()
         currentChatroomId = chatroomId
         _messages.value = emptyList()
@@ -50,12 +48,10 @@ class ChatViewModel : ViewModel() {
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("ChatVM", "WebSocket Opened")
                 subscribeToChatroom(webSocket, chatroomId)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d("ChatVM", "Message: $text")
                 try {
                     val pusherEvent = json.decodeFromString<PusherEvent>(text)
                     if (pusherEvent.event == "App\\Events\\ChatMessageEvent" && pusherEvent.data != null) {
@@ -69,12 +65,12 @@ class ChatViewModel : ViewModel() {
                         addMessage(messageEvent)
                     }
                 } catch (e: Exception) {
-                    Log.e("ChatVM", "Parse error", e)
+                    // Ignore parse errors silently
                 }
             }
             
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("ChatVM", "WebSocket Failure", t)
+                // Ignore WebSocket failures silently
             }
         })
     }
@@ -89,7 +85,6 @@ class ChatViewModel : ViewModel() {
                 }
             }
         """.trimIndent()
-        Log.d("ChatVM", "Sending subscribe: $jsonPayload")
         webSocket.send(jsonPayload)
     }
 
@@ -98,7 +93,7 @@ class ChatViewModel : ViewModel() {
             val currentList = _messages.value.toMutableList()
             currentList.add(0, message)
             if (currentList.size > 100) {
-                currentList.removeLast()
+                currentList.removeAt(currentList.lastIndex)
             }
             _messages.value = currentList
         }

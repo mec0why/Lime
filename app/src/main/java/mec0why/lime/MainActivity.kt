@@ -4,8 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Search
@@ -111,7 +116,8 @@ private fun LimeNavigation() {
                     }
                 }
             }
-        }
+        },
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         NavHost(
             navController = navController,
@@ -122,6 +128,9 @@ private fun LimeNavigation() {
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
+                    modifier = Modifier.windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+                    ),
                     onStreamClick = { slug ->
                         navController.navigate(Screen.Channel.createRoute(slug))
                     }
@@ -130,6 +139,9 @@ private fun LimeNavigation() {
 
             composable(Screen.Search.route) {
                 SearchScreen(
+                    modifier = Modifier.windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+                    ),
                     onChannelClick = { slug ->
                         navController.navigate(Screen.Channel.createRoute(slug))
                     }

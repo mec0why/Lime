@@ -1,7 +1,6 @@
 package mec0why.lime.ui.channel
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -48,7 +47,6 @@ class ChannelViewModel(
                     _playbackUrl.value = response.playbackUrl
                 }
                 .onFailure {
-                    Log.e("ChannelVM", "Channel load failed", it)
                     _error.value = it.message
                 }
             _isLoading.value = false

@@ -1,7 +1,6 @@
 package mec0why.lime.ui.channel
 
 import android.graphics.Color.parseColor
-import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -33,7 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -77,7 +76,7 @@ fun ChatSection(
         }
     }
     
-    var unreadCount by remember { mutableStateOf(0) }
+    var unreadCount by remember { mutableIntStateOf(0) }
     
     LaunchedEffect(messages) {
         if (messages.isNotEmpty()) {
@@ -172,7 +171,7 @@ fun ChatMessageItem(message: ChatMessageEvent) {
         Color.White
     }
 
-    val content = message.content ?: ""
+    val content = message.content
     val emoteRegex = Regex("\\[emote:(\\d+):([^\\]]+)\\]")
     val matches = emoteRegex.findAll(content).toList()
 
@@ -219,18 +218,6 @@ fun ChatMessageItem(message: ChatMessageEvent) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(imageUrl)
-                            .listener(
-                                onError = { _, result ->
-                                    Log.e("CoilEmote", "Failed to load emote $emoteId from $imageUrl: ${result.throwable.message}", result.throwable)
-                                    if (result.throwable is coil.network.HttpException) {
-                                        val httpEx = result.throwable as coil.network.HttpException
-                                        Log.e("CoilEmote", "HTTP Error: ${httpEx.response.code} ${httpEx.response.message}")
-                                    }
-                                },
-                                onSuccess = { _, _ ->
-                                    Log.d("CoilEmote", "Successfully loaded emote $emoteId")
-                                }
-                            )
                             .build(),
                         contentDescription = emoteName,
                         modifier = Modifier.fillMaxSize()

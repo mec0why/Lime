@@ -103,7 +103,19 @@ fun SearchScreen(
                 }
             }
 
-            searchQuery.isNotEmpty() && channels.isEmpty() -> {
+            searchQuery.isNotEmpty() && searchQuery.length < 3 -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Type at least 3 characters to search",
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            searchQuery.length >= 3 && channels.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -182,8 +194,7 @@ fun SearchChannelItem(
                 }
             }
             val isLive = channel.isLive || channel.isLiveNow || channel.livestream != null || 
-                        channel.liveStream != null || channel.user?.isLive == true ||
-                        channel.livestream?.isLive == true || channel.liveStream?.isLive == true
+                        channel.liveStream != null || channel.user?.isLive == true
             if (isLive) {
                 Text(
                     text = "● LIVE",

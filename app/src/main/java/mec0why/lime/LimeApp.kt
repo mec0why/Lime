@@ -1,11 +1,8 @@
 package mec0why.lime
 
 import android.app.Application
-import android.os.Build
-import android.util.Log
 import coil.ImageLoader
 import coil.ImageLoaderFactory
-import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
@@ -25,7 +22,6 @@ import java.util.concurrent.TimeUnit
 class LimeApp : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
-        Log.d("LimeApp", "Building custom Coil ImageLoader")
         val imageClient = OkHttpClient.Builder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
@@ -41,11 +37,7 @@ class LimeApp : Application(), ImageLoaderFactory {
         return ImageLoader.Builder(this)
             .okHttpClient(imageClient)
             .components {
-                if (Build.VERSION.SDK_INT >= 28) {
-                    add(ImageDecoderDecoder.Factory())
-                } else {
-                    add(GifDecoder.Factory())
-                }
+                add(ImageDecoderDecoder.Factory())
             }
             .build()
     }
@@ -78,11 +70,10 @@ class LimeApp : Application(), ImageLoaderFactory {
                 .build()
 
             val response = tokenClient.newCall(request).execute()
-            val body = response.body?.string() ?: ""
+            val body = response.body.string()
             val tokenResponse = json.decodeFromString<TokenResponse>(body)
             tokenResponse.accessToken
         } catch (e: Exception) {
-            Log.e("LimeApp", "Token fetch failed", e)
             ""
         }
     }
