@@ -1,6 +1,5 @@
 package mec0why.lime.ui.channel
 
-import android.graphics.Color.parseColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -50,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.core.graphics.toColorInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -163,7 +163,7 @@ fun ChatMessageItem(message: ChatMessageEvent) {
     val senderColorStr = message.sender?.identity?.color
     val nameColor = try {
         if (!senderColorStr.isNullOrBlank()) {
-            Color(parseColor(senderColorStr))
+            Color(senderColorStr.toColorInt())
         } else {
             Color.White
         }
@@ -173,7 +173,11 @@ fun ChatMessageItem(message: ChatMessageEvent) {
 
     val content = message.content
     val emoteRegex = Regex("\\[emote:(\\d+):([^\\]]+)\\]")
-    val matches = emoteRegex.findAll(content).toList()
+    val linkRegex = Regex("(https?://\\S+)")
+    
+    val emotes = emoteRegex.findAll(content).map { it.range.first to it }.toList()
+    val links = linkRegex.findAll(content).map { it.range.first to it }.toList()
+    val allMatches = (emotes + links).sortedBy { it.first }.map { it.second }
 
     Row(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
@@ -185,17 +189,31 @@ fun ChatMessageItem(message: ChatMessageEvent) {
                 }
                 append(": ")
                 withStyle(style = SpanStyle(color = TextPrimary)) {
-                    if (matches.isEmpty()) {
+                    if (allMatches.isEmpty()) {
                         append(content)
                     } else {
                         var lastIndex = 0
-                        for (match in matches) {
+                        for (match in allMatches) {
                             if (match.range.first > lastIndex) {
                                 append(content.substring(lastIndex, match.range.first))
                             }
-                            val emoteId = match.groupValues[1]
-                            val emoteName = match.groupValues[2]
-                            appendInlineContent("emote_$emoteId", "[$emoteName]")
+                            if (match.value.startsWith("[emote")) {
+                                val emoteId = match.groupValues[1]
+                                val emoteName = match.groupValues[2]
+                                appendInlineContent("emote_$emoteId", "[$emoteName]")
+                            } else {
+                                val url = match.value
+                                pushLink(
+                                    androidx.compose.ui.text.LinkAnnotation.Url(
+                                        url = url,
+                                        styles = androidx.compose.ui.text.TextLinkStyles(
+                                            style = SpanStyle(color = TextPrimary, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                                        )
+                                    )
+                                )
+                                append(url)
+                                pop()
+                            }
                             lastIndex = match.range.last + 1
                         }
                         if (lastIndex < content.length) {
@@ -204,7 +222,7 @@ fun ChatMessageItem(message: ChatMessageEvent) {
                     }
                 }
             },
-            inlineContent = matches.associate { match ->
+            inlineContent = emotes.associate { (_, match) ->
                 val emoteId = match.groupValues[1]
                 val emoteName = match.groupValues[2]
                 "emote_$emoteId" to InlineTextContent(

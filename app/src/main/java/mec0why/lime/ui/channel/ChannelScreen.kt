@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -24,7 +25,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -34,11 +37,14 @@ import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,7 +69,12 @@ import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -71,6 +82,12 @@ import kotlinx.coroutines.delay
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.LimeGreen
 import mec0why.lime.ui.theme.TextSecondary
+
+data class VideoTrackInfo(
+    val name: String,
+    val format: Format,
+    val trackIndex: Int
+)
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @OptIn(UnstableApi::class)
@@ -96,6 +113,11 @@ fun ChannelScreen(
     var isClosing by remember { mutableStateOf(false) }
     var chatWidthFraction by remember { mutableFloatStateOf(0.35f) }
     var isResizing by remember { mutableStateOf(false) }
+
+    var showSettingsSheet by remember { mutableStateOf(false) }
+    var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
+    var selectedTrackName by remember { mutableStateOf("Auto") }
+    var videoTrackGroup by remember { mutableStateOf<TrackGroup?>(null) }
 
     DisposableEffect(Unit) {
         val window = activity?.window
@@ -160,6 +182,52 @@ fun ChannelScreen(
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlayingParam: Boolean) {
                 isPlaying = isPlayingParam
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                super.onTracksChanged(tracks)
+                val newTracks = mutableListOf<VideoTrackInfo>()
+                var foundVideoGroup = false
+                
+                for (group in tracks.groups) {
+                    if (group.type == C.TRACK_TYPE_VIDEO) {
+                        if (!foundVideoGroup) {
+                            videoTrackGroup = group.mediaTrackGroup
+                            foundVideoGroup = true
+                        }
+                        
+                        for (i in 0 until group.length) {
+                            val format = group.getTrackFormat(i)
+                            val height = format.height
+                            val fps = if (format.frameRate > 0) format.frameRate.toInt() else 0
+                            if (height > 0) {
+                                val fpsSuffix = if (fps > 30) "p$fps" else "p"
+                                val name = "$height$fpsSuffix"
+                                newTracks.add(VideoTrackInfo(name, format, i))
+                            }
+                        }
+                    }
+                }
+                
+                availableTracks = newTracks.distinctBy { it.name }.sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
+                
+                val params = exoPlayer.trackSelectionParameters
+                val overrides = params.overrides
+                val currentGroup = videoTrackGroup
+                if (currentGroup != null && overrides.containsKey(currentGroup)) {
+                    val override = overrides[currentGroup]
+                    if (override != null && override.trackIndices.isNotEmpty()) {
+                        val index = override.trackIndices[0]
+                        val format = currentGroup.getFormat(index)
+                        val fps = if (format.frameRate > 0) format.frameRate.toInt() else 0
+                        val fpsSuffix = if (fps > 30) "p$fps" else "p"
+                        selectedTrackName = "${format.height}$fpsSuffix"
+                    } else {
+                        selectedTrackName = "Auto"
+                    }
+                } else {
+                    selectedTrackName = "Auto"
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -295,6 +363,23 @@ fun ChannelScreen(
                                 }
 
                                 IconButton(
+                                    onClick = { showSettingsSheet = true }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = "Settings",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                IconButton(
                                     onClick = { showChatOverlay = !showChatOverlay }
                                 ) {
                                     Icon(
@@ -378,10 +463,8 @@ fun ChannelScreen(
                 }
             }
         }
-        return
-    }
-
-    Scaffold(
+    } else {
+        Scaffold(
         containerColor = DarkBackground
     ) { padding ->
         when {
@@ -502,14 +585,27 @@ fun ChannelScreen(
                                                 }
 
                                                 IconButton(
-                                                    onClick = { isFullscreen = true }
+                                                    onClick = { showSettingsSheet = true }
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Filled.Fullscreen,
-                                                        contentDescription = "Fullscreen",
+                                                        imageVector = Icons.Filled.Settings,
+                                                        contentDescription = "Settings",
                                                         tint = Color.White
                                                     )
                                                 }
+                                            }
+
+                                            IconButton(
+                                                onClick = { isFullscreen = true },
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .padding(8.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Fullscreen,
+                                                    contentDescription = "Fullscreen",
+                                                    tint = Color.White
+                                                )
                                             }
                                         }
                                     }
@@ -568,6 +664,67 @@ fun ChannelScreen(
                         )
                     }
                 }
+            }
+        }
+    }
+    }
+
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            containerColor = DarkBackground
+        ) {
+            Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    text = "Quality", 
+                    style = MaterialTheme.typography.titleLarge, 
+                    color = Color.White, 
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                val options = listOf("Auto") + availableTracks.map { it.name }
+                
+                options.forEach { option ->
+                    val isSelected = option == selectedTrackName
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (option == "Auto") {
+                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                                        .buildUpon()
+                                        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                                        .build()
+                                } else {
+                                    val trackInfo = availableTracks.find { it.name == option }
+                                    if (trackInfo != null && videoTrackGroup != null) {
+                                        val override = TrackSelectionOverride(
+                                            videoTrackGroup!!,
+                                            listOf(trackInfo.trackIndex)
+                                        )
+                                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                                            .buildUpon()
+                                            .setOverrideForType(override)
+                                            .build()
+                                    }
+                                }
+                                showSettingsSheet = false
+                            }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = option,
+                            color = if (isSelected) LimeGreen else Color.White,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        if (isSelected) {
+                            Spacer(Modifier.weight(1f))
+                            Icon(Icons.Filled.Check, contentDescription = null, tint = LimeGreen)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(32.dp))
             }
         }
     }
