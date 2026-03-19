@@ -72,7 +72,7 @@ fun ChatSection(
     val listState = rememberLazyListState()
     val isBottomVisible by remember {
         derivedStateOf {
-            listState.firstVisibleItemIndex <= 5
+            listState.firstVisibleItemIndex <= 3
         }
     }
     
@@ -81,7 +81,7 @@ fun ChatSection(
     LaunchedEffect(messages) {
         if (messages.isNotEmpty()) {
             if (isBottomVisible) {
-                listState.animateScrollToItem(0)
+                listState.scrollToItem(0)
                 unreadCount = 0
             } else {
                 unreadCount++

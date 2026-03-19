@@ -35,9 +35,12 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,9 +79,14 @@ import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.LimeGreen
 import mec0why.lime.ui.theme.TextSecondary
@@ -88,6 +96,12 @@ data class VideoTrackInfo(
     val format: Format,
     val trackIndex: Int
 )
+
+private fun formatViewersCount(count: Int): String = when {
+    count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
+    count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", count / 1_000.0)
+    else -> count.toString()
+}
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @OptIn(UnstableApi::class)
@@ -117,6 +131,7 @@ fun ChannelScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
     var selectedTrackName by remember { mutableStateOf("Auto") }
+    var userExplicitTrackName by remember { mutableStateOf<String?>(null) }
     var videoTrackGroup by remember { mutableStateOf<TrackGroup?>(null) }
 
     DisposableEffect(Unit) {
@@ -129,9 +144,32 @@ fun ChannelScreen(
 
     val context = LocalContext.current
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-        }
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                3000,
+                10000,
+                2500,
+                3000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        val renderersFactory = DefaultRenderersFactory(context)
+            .forceEnableMediaCodecAsynchronousQueueing()
+
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(8000)
+            .setReadTimeoutMs(8000)
+            .setAllowCrossProtocolRedirects(true)
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+
+        ExoPlayer.Builder(context, renderersFactory)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build().apply {
+                playWhenReady = true
+            }
     }
 
     val handleBack = {
@@ -177,9 +215,68 @@ fun ChannelScreen(
     }
 
     var isPlaying by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(true) }
+    var streamUptime by remember { mutableStateOf("00:00") }
+    var streamDelay by remember { mutableStateOf("0.0s") }
+
+    LaunchedEffect(isPlaying, channel) {
+        val createdAtIso = channel?.livestream?.createdAt?.replace(" ", "T")
+        val startMillis = if (!createdAtIso.isNullOrBlank()) {
+            try {
+                val isoString = if (!createdAtIso.endsWith("Z")) "${createdAtIso}Z" else createdAtIso
+                java.time.Instant.parse(isoString).toEpochMilli()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                0L
+            }
+        } else 0L
+
+        while (isActive) {
+            if (startMillis > 0) {
+                val diff = System.currentTimeMillis() - startMillis
+                val seconds = (diff / 1000) % 60
+                val minutes = (diff / (1000 * 60)) % 60
+                val hours = diff / (1000 * 60 * 60)
+                streamUptime = if (hours > 0) {
+                    String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+                } else {
+                    String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+                }
+            } else {
+                streamUptime = "00:00"
+            }
+            
+            val offsetMs = exoPlayer.currentLiveOffset
+            if (offsetMs != androidx.media3.common.C.TIME_UNSET && offsetMs > 0) {
+                streamDelay = String.format(java.util.Locale.US, "%.1fs", offsetMs / 1000f)
+            } else {
+                var fallbackDelay = 0L
+                val timeline = exoPlayer.currentTimeline
+                if (!timeline.isEmpty) {
+                    val window = androidx.media3.common.Timeline.Window()
+                    timeline.getWindow(0, window)
+                    if (window.windowStartTimeMs != androidx.media3.common.C.TIME_UNSET) {
+                        val currentFrameTimeMs = window.windowStartTimeMs + exoPlayer.currentPosition
+                        fallbackDelay = System.currentTimeMillis() - currentFrameTimeMs
+                    }
+                }
+                if (fallbackDelay > 0 && fallbackDelay < 600000) {
+                    streamDelay = String.format(java.util.Locale.US, "%.1fs", fallbackDelay / 1000f)
+                } else {
+                    streamDelay = "0.0s"
+                }
+            }
+            
+            kotlinx.coroutines.delay(1000)
+        }
+    }
 
     LaunchedEffect(exoPlayer) {
         val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+            }
+
             override fun onIsPlayingChanged(isPlayingParam: Boolean) {
                 isPlaying = isPlayingParam
             }
@@ -211,9 +308,21 @@ fun ChannelScreen(
                 
                 availableTracks = newTracks.distinctBy { it.name }.sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
                 
+                val currentGroup = videoTrackGroup
+                if (currentGroup != null && userExplicitTrackName != null && userExplicitTrackName != "Auto") {
+                    val trackInfo = availableTracks.find { it.name == userExplicitTrackName }
+                    if (trackInfo != null) {
+                        val override = TrackSelectionOverride(currentGroup, listOf(trackInfo.trackIndex))
+                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                            .buildUpon()
+                            .setOverrideForType(override)
+                            .build()
+                    }
+                }
+
                 val params = exoPlayer.trackSelectionParameters
                 val overrides = params.overrides
-                val currentGroup = videoTrackGroup
+                
                 if (currentGroup != null && overrides.containsKey(currentGroup)) {
                     val override = overrides[currentGroup]
                     if (override != null && override.trackIndices.isNotEmpty()) {
@@ -242,7 +351,14 @@ fun ChannelScreen(
 
     LaunchedEffect(playbackUrl) {
         playbackUrl?.let { url ->
-            exoPlayer.setMediaItem(MediaItem.fromUri(url))
+            val liveConfig = MediaItem.LiveConfiguration.Builder()
+                .setTargetOffsetMs(5000)
+                .build()
+            val mediaItem = MediaItem.Builder()
+                .setUri(url)
+                .setLiveConfiguration(liveConfig)
+                .build()
+            exoPlayer.setMediaItem(mediaItem)
             exoPlayer.prepare()
         }
     }
@@ -275,6 +391,13 @@ fun ChannelScreen(
                             },
                             modifier = Modifier.fillMaxSize()
                         )
+                        
+                        if (isBuffering) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center).size(48.dp),
+                                color = LimeGreen
+                            )
+                        }
                     } else {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -305,24 +428,28 @@ fun ChannelScreen(
                         exit = fadeOut()
                     ) {
                         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
-                            IconButton(
-                                onClick = {
-                                    isClosing = true
-                                    exoPlayer.stop()
-                                    onBack()
-                                },
+                            Row(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
-                                    .padding(8.dp)
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color.White
-                                )
+                                IconButton(
+                                    onClick = {
+                                        isClosing = true
+                                        exoPlayer.stop()
+                                        onBack()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White
+                                    )
+                                }
                             }
 
-                            if (isLive) {
+                            if (isLive && !isBuffering) {
                                 IconButton(
                                     onClick = {
                                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
@@ -342,13 +469,21 @@ fun ChannelScreen(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (isLive) {
                                     IconButton(
                                         onClick = {
                                             playbackUrl?.let { url ->
-                                                exoPlayer.setMediaItem(MediaItem.fromUri(url))
+                                                val liveConfig = MediaItem.LiveConfiguration.Builder()
+                                                    .setTargetOffsetMs(5000)
+                                                    .build()
+                                                val mediaItem = MediaItem.Builder()
+                                                    .setUri(url)
+                                                    .setLiveConfiguration(liveConfig)
+                                                    .build()
+                                                exoPlayer.setMediaItem(mediaItem)
                                                 exoPlayer.prepare()
                                                 exoPlayer.play()
                                             }
@@ -370,6 +505,31 @@ fun ChannelScreen(
                                         contentDescription = "Settings",
                                         tint = Color.White
                                     )
+                                }
+                            }
+
+                            if (isLive) {
+                                Row(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                    channel?.livestream?.viewerCount?.let { count ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(16.dp))
+                                            Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                        }
+                                    }
                                 }
                             }
 
@@ -528,6 +688,13 @@ fun ChannelScreen(
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
+
+                                    if (isBuffering) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.align(Alignment.Center).size(48.dp),
+                                            color = LimeGreen
+                                        )
+                                    }
                                     
                                     androidx.compose.animation.AnimatedVisibility(
                                         visible = showControls,
@@ -535,43 +702,57 @@ fun ChannelScreen(
                                         exit = fadeOut()
                                     ) {
                                         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
-                                            IconButton(
-                                                onClick = handleBack,
+                                            Row(
                                                 modifier = Modifier
                                                     .align(Alignment.TopStart)
-                                                    .padding(8.dp)
+                                                    .padding(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                    contentDescription = "Back",
-                                                    tint = Color.White
-                                                )
+                                                IconButton(
+                                                    onClick = handleBack
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                        contentDescription = "Back",
+                                                        tint = Color.White
+                                                    )
+                                                }
                                             }
 
-                                            IconButton(
-                                                onClick = {
-                                                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                                },
-                                                modifier = Modifier.align(Alignment.Center)
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                                    contentDescription = "Play/Pause",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(64.dp)
-                                                )
+                                            if (!isBuffering) {
+                                                IconButton(
+                                                    onClick = {
+                                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                    },
+                                                    modifier = Modifier.align(Alignment.Center)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                                        contentDescription = "Play/Pause",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(64.dp)
+                                                    )
+                                                }
                                             }
 
                                             Row(
                                                 modifier = Modifier
                                                     .align(Alignment.TopEnd)
                                                     .padding(8.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 IconButton(
                                                     onClick = {
                                                         playbackUrl?.let { url ->
-                                                            exoPlayer.setMediaItem(MediaItem.fromUri(url))
+                                                            val liveConfig = MediaItem.LiveConfiguration.Builder()
+                                                                .setTargetOffsetMs(5000)
+                                                                .build()
+                                                            val mediaItem = MediaItem.Builder()
+                                                                .setUri(url)
+                                                                .setLiveConfiguration(liveConfig)
+                                                                .build()
+                                                            exoPlayer.setMediaItem(mediaItem)
                                                             exoPlayer.prepare()
                                                             exoPlayer.play()
                                                         }
@@ -592,6 +773,30 @@ fun ChannelScreen(
                                                         contentDescription = "Settings",
                                                         tint = Color.White
                                                     )
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomStart)
+                                                    .padding(8.dp)
+                                                    .padding(start = 4.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                channel?.livestream?.viewerCount?.let { count ->
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(14.dp))
+                                                        Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                                    }
                                                 }
                                             }
 
@@ -690,6 +895,7 @@ fun ChannelScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
+                                userExplicitTrackName = option
                                 if (option == "Auto") {
                                     exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                                         .buildUpon()

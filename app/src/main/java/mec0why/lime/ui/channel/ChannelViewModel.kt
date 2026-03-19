@@ -34,6 +34,19 @@ class ChannelViewModel(
 
     init {
         loadChannel()
+        startViewersPolling()
+    }
+
+    private fun startViewersPolling() {
+        if (slug.isBlank()) return
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30000)
+                repository.getChannel(slug).onSuccess { response ->
+                    _channel.value = response
+                }
+            }
+        }
     }
 
     fun loadChannel() {
