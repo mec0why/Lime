@@ -70,9 +70,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
 
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.exoplayer.hls)
-    implementation(libs.media3.ui)
+    implementation(libs.ivs.player)
 
     implementation(libs.navigation.compose)
     implementation(libs.lifecycle.viewmodel.compose)

@@ -2,15 +2,15 @@ package mec0why.lime.ui.channel
 
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,17 +32,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -72,19 +73,9 @@ import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.C
-import androidx.media3.common.Format
-import androidx.media3.common.MediaItem
-import androidx.media3.common.TrackGroup
-import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.common.Tracks
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.ui.PlayerView
+import com.amazonaws.ivs.player.Cue
+import com.amazonaws.ivs.player.Player
+import com.amazonaws.ivs.player.PlayerException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import mec0why.lime.ui.theme.DarkBackground
@@ -93,7 +84,6 @@ import mec0why.lime.ui.theme.TextSecondary
 
 data class VideoTrackInfo(
     val name: String,
-    val format: Format,
     val trackIndex: Int
 )
 
@@ -104,7 +94,6 @@ private fun formatViewersCount(count: Int): String = when {
 }
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
-@OptIn(UnstableApi::class)
 @Composable
 fun ChannelScreen(
     onBack: () -> Unit,
@@ -125,14 +114,13 @@ fun ChannelScreen(
     var showControls by remember { mutableStateOf(true) }
     var showChatOverlay by remember { mutableStateOf(true) }
     var isClosing by remember { mutableStateOf(false) }
-    var chatWidthFraction by remember { mutableFloatStateOf(0.35f) }
+    var chatWidthFraction by remember { mutableFloatStateOf(0.30f) }
     var isResizing by remember { mutableStateOf(false) }
 
     var showSettingsSheet by remember { mutableStateOf(false) }
     var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
     var selectedTrackName by remember { mutableStateOf("Auto") }
     var userExplicitTrackName by remember { mutableStateOf<String?>(null) }
-    var videoTrackGroup by remember { mutableStateOf<TrackGroup?>(null) }
 
     DisposableEffect(Unit) {
         val window = activity?.window
@@ -143,33 +131,11 @@ fun ChannelScreen(
     }
 
     val context = LocalContext.current
-    val exoPlayer = remember {
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                3000,
-                10000,
-                2500,
-                3000
-            )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-
-        val renderersFactory = DefaultRenderersFactory(context)
-            .forceEnableMediaCodecAsynchronousQueueing()
-
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(8000)
-            .setReadTimeoutMs(8000)
-            .setAllowCrossProtocolRedirects(true)
-
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
-
-        ExoPlayer.Builder(context, renderersFactory)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build().apply {
-                playWhenReady = true
-            }
+    
+    val ivsPlayer = remember {
+        Player.Factory.create(context).apply {
+            setLiveLowLatencyEnabled(true)
+        }
     }
 
     val handleBack = {
@@ -177,7 +143,7 @@ fun ChannelScreen(
             isFullscreen = false
         } else {
             isClosing = true
-            exoPlayer.stop()
+            ivsPlayer.pause()
             onBack()
         }
     }
@@ -204,7 +170,7 @@ fun ChannelScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            exoPlayer.release()
+            ivsPlayer.release()
             val window = activity?.window
             if (window != null) {
                 WindowInsetsControllerCompat(window, window.decorView)
@@ -215,11 +181,12 @@ fun ChannelScreen(
     }
 
     var isPlaying by remember { mutableStateOf(true) }
-    var isBuffering by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(false) }
+    var isCatchingUp by remember { mutableStateOf(false) }
     var streamUptime by remember { mutableStateOf("00:00") }
     var streamDelay by remember { mutableStateOf("0.0s") }
 
-    LaunchedEffect(isPlaying, channel) {
+    LaunchedEffect(isPlaying, channel, isCatchingUp) {
         val createdAtIso = channel?.livestream?.createdAt?.replace(" ", "T")
         val startMillis = if (!createdAtIso.isNullOrBlank()) {
             try {
@@ -246,100 +213,79 @@ fun ChannelScreen(
                 streamUptime = "00:00"
             }
             
-            val offsetMs = exoPlayer.currentLiveOffset
-            if (offsetMs != androidx.media3.common.C.TIME_UNSET && offsetMs > 0) {
+            val offsetMs = ivsPlayer.liveLatency
+            if (offsetMs > 0) {
                 streamDelay = String.format(java.util.Locale.US, "%.1fs", offsetMs / 1000f)
+                
+                if (isCatchingUp && offsetMs < 1000L) {
+                    isCatchingUp = false
+                    ivsPlayer.setPlaybackRate(1.0f)
+                }
             } else {
-                var fallbackDelay = 0L
-                val timeline = exoPlayer.currentTimeline
-                if (!timeline.isEmpty) {
-                    val window = androidx.media3.common.Timeline.Window()
-                    timeline.getWindow(0, window)
-                    if (window.windowStartTimeMs != androidx.media3.common.C.TIME_UNSET) {
-                        val currentFrameTimeMs = window.windowStartTimeMs + exoPlayer.currentPosition
-                        fallbackDelay = System.currentTimeMillis() - currentFrameTimeMs
-                    }
-                }
-                if (fallbackDelay > 0 && fallbackDelay < 600000) {
-                    streamDelay = String.format(java.util.Locale.US, "%.1fs", fallbackDelay / 1000f)
-                } else {
-                    streamDelay = "0.0s"
-                }
+                streamDelay = "0.0s"
             }
             
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(if (isCatchingUp) 200L else 1000L)
         }
     }
 
-    LaunchedEffect(exoPlayer) {
-        val listener = object : androidx.media3.common.Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-            }
+    var videoWidth by remember { mutableStateOf(16) }
+    var videoHeight by remember { mutableStateOf(9) }
 
-            override fun onIsPlayingChanged(isPlayingParam: Boolean) {
-                isPlaying = isPlayingParam
-            }
-
-            override fun onTracksChanged(tracks: Tracks) {
-                super.onTracksChanged(tracks)
-                val newTracks = mutableListOf<VideoTrackInfo>()
-                var foundVideoGroup = false
+    LaunchedEffect(ivsPlayer) {
+        val listener = object : Player.Listener() {
+            override fun onStateChanged(state: Player.State) {
+                isPlaying = state == Player.State.PLAYING
+                isBuffering = state == Player.State.BUFFERING
                 
-                for (group in tracks.groups) {
-                    if (group.type == C.TRACK_TYPE_VIDEO) {
-                        if (!foundVideoGroup) {
-                            videoTrackGroup = group.mediaTrackGroup
-                            foundVideoGroup = true
-                        }
+                if (state == Player.State.BUFFERING && isCatchingUp) {
+                    isCatchingUp = false
+                    ivsPlayer.setPlaybackRate(1.0f)
+                }
+                
+                if (state == Player.State.PLAYING || state == Player.State.READY) {
+                    val qualities = ivsPlayer.qualities
+                    val newTracks = mutableListOf<VideoTrackInfo>()
+                    qualities.forEachIndexed { index, quality ->
+                        newTracks.add(VideoTrackInfo(quality.name, index))
+                    }
+                    availableTracks = newTracks.distinctBy { it.name }
+                        .sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
                         
-                        for (i in 0 until group.length) {
-                            val format = group.getTrackFormat(i)
-                            val height = format.height
-                            val fps = if (format.frameRate > 0) format.frameRate.toInt() else 0
-                            if (height > 0) {
-                                val fpsSuffix = if (fps > 30) "p$fps" else "p"
-                                val name = "$height$fpsSuffix"
-                                newTracks.add(VideoTrackInfo(name, format, i))
-                            }
+                    if (ivsPlayer.isAutoQualityMode) {
+                        if (ivsPlayer.quality != null) {
+                            selectedTrackName = "Auto: ${ivsPlayer.quality.name}"
+                        } else {
+                            selectedTrackName = "Auto"
+                        }
+                    } else {
+                        if (ivsPlayer.quality != null) {
+                            selectedTrackName = ivsPlayer.quality.name
                         }
                     }
                 }
-                
-                availableTracks = newTracks.distinctBy { it.name }.sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
-                
-                val currentGroup = videoTrackGroup
-                if (currentGroup != null && userExplicitTrackName != null && userExplicitTrackName != "Auto") {
-                    val trackInfo = availableTracks.find { it.name == userExplicitTrackName }
-                    if (trackInfo != null) {
-                        val override = TrackSelectionOverride(currentGroup, listOf(trackInfo.trackIndex))
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .setOverrideForType(override)
-                            .build()
-                    }
-                }
+            }
 
-                val params = exoPlayer.trackSelectionParameters
-                val overrides = params.overrides
-                
-                if (currentGroup != null && overrides.containsKey(currentGroup)) {
-                    val override = overrides[currentGroup]
-                    if (override != null && override.trackIndices.isNotEmpty()) {
-                        val index = override.trackIndices[0]
-                        val format = currentGroup.getFormat(index)
-                        val fps = if (format.frameRate > 0) format.frameRate.toInt() else 0
-                        val fpsSuffix = if (fps > 30) "p$fps" else "p"
-                        selectedTrackName = "${format.height}$fpsSuffix"
-                    } else {
-                        selectedTrackName = "Auto"
-                    }
-                } else {
-                    selectedTrackName = "Auto"
+            override fun onVideoSizeChanged(width: Int, height: Int) {
+                if (width > 0 && height > 0) {
+                    videoWidth = width
+                    videoHeight = height
                 }
             }
+            override fun onQualityChanged(quality: com.amazonaws.ivs.player.Quality) {
+                if (ivsPlayer.isAutoQualityMode) {
+                    selectedTrackName = "Auto: ${quality.name}"
+                } else {
+                    selectedTrackName = quality.name
+                }
+            }
+            override fun onDurationChanged(duration: Long) {}
+            override fun onError(exception: PlayerException) {}
+            override fun onCue(cue: Cue) {}
+            override fun onRebuffering() {}
+            override fun onSeekCompleted(position: Long) {}
         }
-        exoPlayer.addListener(listener)
+        ivsPlayer.addListener(listener)
     }
 
     LaunchedEffect(showControls) {
@@ -351,240 +297,23 @@ fun ChannelScreen(
 
     LaunchedEffect(playbackUrl) {
         playbackUrl?.let { url ->
-            val liveConfig = MediaItem.LiveConfiguration.Builder()
-                .setTargetOffsetMs(5000)
-                .build()
-            val mediaItem = MediaItem.Builder()
-                .setUri(url)
-                .setLiveConfiguration(liveConfig)
-                .build()
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.prepare()
+            ivsPlayer.load(Uri.parse(url))
+            ivsPlayer.play()
         }
     }
 
     val isLive = !playbackUrl.isNullOrBlank() && channel?.livestream != null
 
-    if (isFullscreen && !isClosing) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            val screenWidth = maxWidth
-            val screenWidthPx = constraints.maxWidth.toFloat()
-
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(modifier = Modifier
-                    .weight(if (showChatOverlay) 1f - chatWidthFraction else 1f)
-                    .fillMaxHeight()
-                    .pointerInput(Unit) {
-                        detectTapGestures { showControls = !showControls }
-                    }
-                ) {
-                    if (isLive) {
-                        AndroidView(
-                            factory = { ctx ->
-                                PlayerView(ctx).apply {
-                                    player = exoPlayer
-                                    useController = false
-                                }
-                            },
-                            update = { view ->
-                                view.player = exoPlayer
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        
-                        if (isBuffering) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.align(Alignment.Center).size(48.dp),
-                                color = LimeGreen
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.LiveTv,
-                                    contentDescription = null,
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Text(
-                                    text = "Stream is currently offline",
-                                    color = TextSecondary,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                            }
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showControls,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        isClosing = true
-                                        exoPlayer.stop()
-                                        onBack()
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-
-                            if (isLive && !isBuffering) {
-                                IconButton(
-                                    onClick = {
-                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                    },
-                                    modifier = Modifier.align(Alignment.Center)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                        contentDescription = "Play/Pause",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(64.dp)
-                                    )
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (isLive) {
-                                    IconButton(
-                                        onClick = {
-                                            playbackUrl?.let { url ->
-                                                val liveConfig = MediaItem.LiveConfiguration.Builder()
-                                                    .setTargetOffsetMs(5000)
-                                                    .build()
-                                                val mediaItem = MediaItem.Builder()
-                                                    .setUri(url)
-                                                    .setLiveConfiguration(liveConfig)
-                                                    .build()
-                                                exoPlayer.setMediaItem(mediaItem)
-                                                exoPlayer.prepare()
-                                                exoPlayer.play()
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Refresh,
-                                            contentDescription = "Refresh",
-                                            tint = Color.White
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    onClick = { showSettingsSheet = true }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Settings,
-                                        contentDescription = "Settings",
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-
-                            if (isLive) {
-                                Row(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(16.dp))
-                                        Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelMedium)
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(16.dp))
-                                        Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelMedium)
-                                    }
-                                    channel?.livestream?.viewerCount?.let { count ->
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(16.dp))
-                                            Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelMedium)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                IconButton(
-                                    onClick = { showChatOverlay = !showChatOverlay }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                                        contentDescription = "Toggle Chat",
-                                        tint = if (showChatOverlay) Color.White else Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { isFullscreen = false }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.FullscreenExit,
-                                        contentDescription = "Exit fullscreen",
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                if (showChatOverlay) {
-                    channel?.chatroom?.id?.let { chatroomId ->
-                        Box(
-                            modifier = Modifier
-                                .weight(chatWidthFraction)
-                                .fillMaxHeight()
-                                .background(DarkBackground)
-                        ) {
-                            ChatSection(
-                                chatroomId = chatroomId,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize().background(DarkBackground)
+    ) {
+        val screenWidthPx = constraints.maxWidth.toFloat()
+        val screenWidth = maxWidth
+        
+        if (isFullscreen && !isClosing) {
             if (showChatOverlay) {
-                val boundaryX = screenWidth * (1f - chatWidthFraction)
-
+                val boundaryX = maxWidth * (1f - chatWidthFraction)
+                
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -603,7 +332,7 @@ fun ChannelScreen(
                                     showControls = true
                                     change.consume()
                                     val dragFraction = dragAmount / screenWidthPx
-                                    chatWidthFraction = (chatWidthFraction - dragFraction).coerceIn(0.2f, 0.7f)
+                                    chatWidthFraction = (chatWidthFraction - dragFraction).coerceIn(0.2f, 0.6f)
                                 }
                             )
                         }
@@ -621,257 +350,301 @@ fun ChannelScreen(
                         )
                     }
                 }
-            }
-        }
-    } else {
-        Scaffold(
-        containerColor = DarkBackground
-    ) { padding ->
-        when {
-            isLoading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                }
-            }
 
-            error != null && channel == null -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = error ?: "An error occurred",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            else -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
+                channel?.chatroom?.id?.let { chatroomId ->
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .background(Color.Black)
+                            .align(Alignment.CenterEnd)
+                            .fillMaxWidth(chatWidthFraction)
+                            .fillMaxHeight()
+                            .background(DarkBackground)
+                            .zIndex(1f)
                     ) {
-                        when {
-                            isClosing -> {
-                                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
-                            }
-                            isLive && !isClosing -> {
-                                Box(modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        detectTapGestures { showControls = !showControls }
-                                    }
-                                ) {
-                                    AndroidView(
-                                        factory = { ctx ->
-                                            PlayerView(ctx).apply {
-                                                player = exoPlayer
-                                                useController = false
-                                            }
-                                        },
-                                        update = { view ->
-                                            view.player = exoPlayer
-                                        },
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                        ChatSection(
+                            chatroomId = chatroomId,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        } else {
+            Scaffold(containerColor = DarkBackground) { padding ->
+                when {
+                    isLoading -> {
+                        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    error != null && channel == null -> {
+                        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                            Text(text = error ?: "An error occurred", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    else -> {
+                        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            StreamDetailsSection(
+                                channel = channel,
+                                showControls = showControls
+                            )
 
-                                    if (isBuffering) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.align(Alignment.Center).size(48.dp),
-                                            color = LimeGreen
-                                        )
-                                    }
-                                    
-                                    androidx.compose.animation.AnimatedVisibility(
-                                        visible = showControls,
-                                        enter = fadeIn(),
-                                        exit = fadeOut()
-                                    ) {
-                                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopStart)
-                                                    .padding(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                IconButton(
-                                                    onClick = handleBack
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                        contentDescription = "Back",
-                                                        tint = Color.White
-                                                    )
-                                                }
-                                            }
-
-                                            if (!isBuffering) {
-                                                IconButton(
-                                                    onClick = {
-                                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                                    },
-                                                    modifier = Modifier.align(Alignment.Center)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                                        contentDescription = "Play/Pause",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(64.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            Row(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(8.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                IconButton(
-                                                    onClick = {
-                                                        playbackUrl?.let { url ->
-                                                            val liveConfig = MediaItem.LiveConfiguration.Builder()
-                                                                .setTargetOffsetMs(5000)
-                                                                .build()
-                                                            val mediaItem = MediaItem.Builder()
-                                                                .setUri(url)
-                                                                .setLiveConfiguration(liveConfig)
-                                                                .build()
-                                                            exoPlayer.setMediaItem(mediaItem)
-                                                            exoPlayer.prepare()
-                                                            exoPlayer.play()
-                                                        }
-                                                    }
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Refresh,
-                                                        contentDescription = "Refresh",
-                                                        tint = Color.White
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = { showSettingsSheet = true }
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Settings,
-                                                        contentDescription = "Settings",
-                                                        tint = Color.White
-                                                    )
-                                                }
-                                            }
-
-                                            Row(
-                                                modifier = Modifier
-                                                    .align(Alignment.BottomStart)
-                                                    .padding(8.dp)
-                                                    .padding(start = 4.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(14.dp))
-                                                    Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelSmall)
-                                                }
-                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(14.dp))
-                                                    Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelSmall)
-                                                }
-                                                channel?.livestream?.viewerCount?.let { count ->
-                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                        Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(14.dp))
-                                                        Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                }
-                                            }
-
-                                            IconButton(
-                                                onClick = { isFullscreen = true },
-                                                modifier = Modifier
-                                                    .align(Alignment.BottomEnd)
-                                                    .padding(8.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Fullscreen,
-                                                    contentDescription = "Fullscreen",
-                                                    tint = Color.White
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            else -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    IconButton(
-                                        onClick = handleBack,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = "Back",
-                                            tint = Color.White
-                                        )
-                                    }
-
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.LiveTv,
-                                            contentDescription = null,
-                                            tint = TextSecondary,
-                                            modifier = Modifier.size(48.dp)
-                                        )
-                                        Text(
-                                            text = "Stream is currently offline",
-                                            color = TextSecondary,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                    }
-                                }
+                            channel?.chatroom?.id?.let { chatroomId ->
+                                ChatSection(
+                                    chatroomId = chatroomId,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
+                }
+            }
+        }
+        
+        val videoLayerModifier = if (isFullscreen && !isClosing) {
+            Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .fillMaxWidth(if (showChatOverlay) 1f - chatWidthFraction else 1f)
+                .background(Color.Black)
+                .zIndex(0f)
+        } else {
+            Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(Color.Black)
+                .zIndex(3f)
+        }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    StreamDetailsSection(
-                        channel = channel,
-                        showControls = showControls
+        Box(
+            modifier = videoLayerModifier
+                .pointerInput(Unit) {
+                    detectTapGestures { showControls = !showControls }
+                }
+        ) {
+            if (isClosing) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+            } else if (isLive) {
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val vidRatio = videoWidth.toFloat() / videoHeight.toFloat()
+                    val boxRatio = if (maxHeight.value > 0) maxWidth.value / maxHeight.value else 1f
+                    val isVideoWider = vidRatio > boxRatio
+                    
+                    AndroidView(
+                        factory = { ctx ->
+                            android.view.SurfaceView(ctx).apply {
+                                layoutParams = android.view.ViewGroup.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                                    override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                                        ivsPlayer.setSurface(holder.surface)
+                                    }
+                                    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, w: Int, h: Int) {}
+                                    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                                        ivsPlayer.setSurface(null)
+                                    }
+                                })
+                            }
+                        },
+                        modifier = Modifier
+                            .aspectRatio(vidRatio, matchHeightConstraintsFirst = !isVideoWider)
                     )
+                    
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center).size(64.dp),
+                            color = LimeGreen,
+                            strokeWidth = 6.dp
+                        )
+                    }
+                }
+                
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showControls,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (isFullscreen) isFullscreen = false else {
+                                        isClosing = true
+                                        ivsPlayer.pause()
+                                        onBack()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = Color.White
+                                )
+                            }
+                        }
 
-                    channel?.chatroom?.id?.let { chatroomId ->
-                        ChatSection(
-                            chatroomId = chatroomId,
-                            modifier = Modifier.weight(1f)
+                        if (!isBuffering) {
+                            IconButton(
+                                onClick = {
+                                    if (isPlaying) ivsPlayer.pause() else ivsPlayer.play()
+                                },
+                                modifier = Modifier.align(Alignment.Center)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    isCatchingUp = !isCatchingUp
+                                    ivsPlayer.setPlaybackRate(if (isCatchingUp) 1.1f else 1.0f)
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.FastForward,
+                                    contentDescription = "Catch up latency",
+                                    tint = if (isCatchingUp) LimeGreen else Color.White
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showSettingsSheet = true }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Settings,
+                                    contentDescription = "Settings",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .align(if (isFullscreen) Alignment.BottomStart else Alignment.BottomStart)
+                                .padding(8.dp)
+                                .padding(start = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                            }
+                            channel?.livestream?.viewerCount?.let { count ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (isFullscreen) {
+                                IconButton(
+                                    onClick = { showChatOverlay = !showChatOverlay }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = "Toggle Chat",
+                                        tint = if (showChatOverlay) Color.White else Color.White.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { isFullscreen = !isFullscreen }
+                            ) {
+                                Icon(
+                                    imageVector = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                    contentDescription = "Toggle fullscreen",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    IconButton(
+                        onClick = {
+                            isClosing = true
+                            ivsPlayer.pause()
+                            onBack()
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
+                    }
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LiveTv,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "Stream is currently offline",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.titleMedium
                         )
                     }
                 }
             }
         }
-    }
     }
 
     if (showSettingsSheet) {
@@ -890,28 +663,24 @@ fun ChannelScreen(
                 val options = listOf("Auto") + availableTracks.map { it.name }
                 
                 options.forEach { option ->
-                    val isSelected = option == selectedTrackName
+                    val isSelected = if (option == "Auto") selectedTrackName.startsWith("Auto") else option == selectedTrackName
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 userExplicitTrackName = option
                                 if (option == "Auto") {
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-                                        .build()
+                                    ivsPlayer.isAutoQualityMode = true
+                                    if (ivsPlayer.quality != null) {
+                                        selectedTrackName = "Auto: ${ivsPlayer.quality.name}"
+                                    } else {
+                                        selectedTrackName = "Auto"
+                                    }
                                 } else {
-                                    val trackInfo = availableTracks.find { it.name == option }
-                                    if (trackInfo != null && videoTrackGroup != null) {
-                                        val override = TrackSelectionOverride(
-                                            videoTrackGroup!!,
-                                            listOf(trackInfo.trackIndex)
-                                        )
-                                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                            .buildUpon()
-                                            .setOverrideForType(override)
-                                            .build()
+                                    val quality = ivsPlayer.qualities.find { it.name == option }
+                                    if (quality != null) {
+                                        ivsPlayer.setQuality(quality)
+                                        selectedTrackName = option
                                     }
                                 }
                                 showSettingsSheet = false

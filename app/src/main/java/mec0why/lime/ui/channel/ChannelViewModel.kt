@@ -41,7 +41,7 @@ class ChannelViewModel(
         if (slug.isBlank()) return
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(30000)
+                kotlinx.coroutines.delay(10000)
                 repository.getChannel(slug).onSuccess { response ->
                     _channel.value = response
                 }
