@@ -78,7 +78,22 @@ data class ChannelResponse(
     @SerialName("livestream") val livestream: ChannelLivestream? = null,
     @Serializable(with = VerifiedSerializer::class) val verified: Boolean = false,
     @SerialName("recent_categories") val recentCategories: List<RecentCategory> = emptyList(),
-    @SerialName("chatroom") val chatroom: Chatroom? = null
+    @SerialName("chatroom") val chatroom: Chatroom? = null,
+    @SerialName("subscriber_badges") val subscriberBadges: List<SubscriberBadge> = emptyList()
+)
+
+@Serializable
+data class SubscriberBadge(
+    val id: Int = 0,
+    @SerialName("channel_id") val channelId: Int = 0,
+    val months: Int = 0,
+    @SerialName("badge_image") val badgeImage: BadgeImage? = null
+)
+
+@Serializable
+data class BadgeImage(
+    @SerialName("src") val src: String = "",
+    val srcset: String = ""
 )
 
 @Serializable

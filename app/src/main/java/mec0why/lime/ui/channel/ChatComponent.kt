@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,18 +57,28 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import mec0why.lime.data.model.ChatMessageEvent
+import mec0why.lime.data.model.SevenTVEmote
+import mec0why.lime.ui.theme.LimeGreen
 import mec0why.lime.ui.theme.TextPrimary
+import mec0why.lime.ui.theme.TextSecondary
+import mec0why.lime.util.ChatParser
+import mec0why.lime.util.ChatToken
+import java.util.UUID
 
 @Composable
 fun ChatSection(
     chatroomId: Int,
+    kickUserId: Int? = null,
+    subscriberBadges: List<mec0why.lime.data.model.SubscriberBadge> = emptyList(),
     modifier: Modifier = Modifier,
     viewModel: ChatViewModel = viewModel()
 ) {
     val messages by viewModel.messages.collectAsState()
+    val sevenTvEmotes by viewModel.sevenTvEmotes.collectAsState()
+    val userColors by viewModel.userColors.collectAsState()
 
-    LaunchedEffect(chatroomId) {
-        viewModel.connect(chatroomId)
+    LaunchedEffect(chatroomId, kickUserId) {
+        viewModel.connect(chatroomId, kickUserId)
     }
 
     val listState = rememberLazyListState()
@@ -102,10 +114,16 @@ fun ChatSection(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             reverseLayout = true,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)
         ) {
             items(messages, key = { it.id }) { message ->
-                ChatMessageItem(message = message)
+                ChatMessageItem(
+                    message = message,
+                    sevenTvEmotes = sevenTvEmotes,
+                    userColors = userColors,
+                    subscriberBadges = subscriberBadges
+                )
             }
         }
 
@@ -159,7 +177,12 @@ fun ChatSection(
 }
 
 @Composable
-fun ChatMessageItem(message: ChatMessageEvent) {
+fun ChatMessageItem(
+    message: ChatMessageEvent,
+    sevenTvEmotes: Map<String, SevenTVEmote> = emptyMap(),
+    userColors: Map<String, String> = emptyMap(),
+    subscriberBadges: List<mec0why.lime.data.model.SubscriberBadge> = emptyList()
+) {
     val senderColorStr = message.sender?.identity?.color
     val nameColor = try {
         if (!senderColorStr.isNullOrBlank()) {
@@ -172,77 +195,170 @@ fun ChatMessageItem(message: ChatMessageEvent) {
     }
 
     val content = message.content
-    val emoteRegex = Regex("\\[emote:(\\d+):([^\\]]+)\\]")
-    val linkRegex = Regex("(https?://\\S+)")
-    
-    val emotes = emoteRegex.findAll(content).map { it.range.first to it }.toList()
-    val links = linkRegex.findAll(content).map { it.range.first to it }.toList()
-    val allMatches = (emotes + links).sortedBy { it.first }.map { it.second }
+    val tokens = remember(content, sevenTvEmotes) {
+        ChatParser.parseMessage(content, sevenTvEmotes)
+    }
 
-    Row(
+    Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
     ) {
+        if (message.type == "reply" && message.metadata?.originalSender != null) {
+            Row(
+                modifier = Modifier.padding(start = 8.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = "Reply",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Replying to @${message.metadata.originalSender.username}: ${message.metadata.originalMessage?.content ?: ""}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+        
+        Row {
+            val inlineContentMap = mutableMapOf<String, InlineTextContent>()
+
         Text(
             text = buildAnnotatedString {
+                message.sender?.identity?.badges?.forEach { badge ->
+                    val badgeId = "badge_${badge.type}_${UUID.randomUUID()}"
+                    appendInlineContent(badgeId, "[${badge.type}]")
+                    inlineContentMap[badgeId] = InlineTextContent(
+                        Placeholder(
+                            width = 1.3.em,
+                            height = 1.3.em,
+                            placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                        )
+                    ) {
+                        val imageUrl = if (badge.type == "subscriber") {
+                            val sortedBadges = subscriberBadges.sortedByDescending { it.months }
+                            val bestBadge = sortedBadges.firstOrNull { badge.count >= it.months }
+                            bestBadge?.badgeImage?.src ?: "https://cdn.kicktalk.app/Badges/subscriber.svg"
+                        } else if (badge.type == "sub_gifter") {
+                            "https://cdn.kicktalk.app/Badges/subgifter1.svg"
+                        } else {
+                            "https://cdn.kicktalk.app/Badges/${badge.type}.svg"
+                        }
+                        
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(imageUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = badge.text,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    append(" ")
+                }
+
                 withStyle(style = SpanStyle(color = nameColor, fontWeight = FontWeight.Bold)) {
                     append(message.sender?.username ?: "Unknown")
                 }
                 append(": ")
                 withStyle(style = SpanStyle(color = TextPrimary)) {
-                    if (allMatches.isEmpty()) {
-                        append(content)
-                    } else {
-                        var lastIndex = 0
-                        for (match in allMatches) {
-                            if (match.range.first > lastIndex) {
-                                append(content.substring(lastIndex, match.range.first))
+                    for (token in tokens) {
+                        when (token) {
+                            is ChatToken.Text -> {
+                                append(token.text)
                             }
-                            if (match.value.startsWith("[emote")) {
-                                val emoteId = match.groupValues[1]
-                                val emoteName = match.groupValues[2]
-                                appendInlineContent("emote_$emoteId", "[$emoteName]")
-                            } else {
-                                val url = match.value
+                            is ChatToken.Mention -> {
+                                val mentionColorStr = userColors[token.username.lowercase()] ?: userColors[token.username.replace("@", "").lowercase()]
+                                val mentionColor = try {
+                                    if (!mentionColorStr.isNullOrBlank()) {
+                                        Color(mentionColorStr.toColorInt())
+                                    } else {
+                                        LimeGreen
+                                    }
+                                } catch (e: Exception) {
+                                    LimeGreen
+                                }
+                                withStyle(style = SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {
+                                    append("@${token.username.replace("@", "")}")
+                                }
+                            }
+                            is ChatToken.Link -> {
                                 pushLink(
                                     androidx.compose.ui.text.LinkAnnotation.Url(
-                                        url = url,
+                                        url = token.url,
                                         styles = androidx.compose.ui.text.TextLinkStyles(
                                             style = SpanStyle(color = TextPrimary, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
                                         )
                                     )
                                 )
-                                append(url)
+                                append(token.url)
                                 pop()
                             }
-                            lastIndex = match.range.last + 1
-                        }
-                        if (lastIndex < content.length) {
-                            append(content.substring(lastIndex))
+                            is ChatToken.KickEmote -> {
+                                val inlineId = "kick_${token.id}"
+                                appendInlineContent(inlineId, "[${token.name}]")
+                                inlineContentMap[inlineId] = InlineTextContent(
+                                    Placeholder(
+                                        width = 2.2.em,
+                                        height = 2.2.em,
+                                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                                    )
+                                ) {
+                                    val imageUrl = "https://files.kick.com/emotes/${token.id}/fullsize"
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(imageUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = token.name,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                            is ChatToken.SevenTvEmoteToken -> {
+                                val baseEmote = token.emotes.first()
+                                val file = baseEmote.data?.host?.files?.firstOrNull()
+                                val aspectRatio = if (file != null && file.height > 0) file.width.toFloat() / file.height.toFloat() else 1.0f
+                                val widthEmStr = (2.2f * aspectRatio).em
+
+                                val inlineId = "7tv_${baseEmote.id}_${UUID.randomUUID()}"
+                                appendInlineContent(inlineId, "[${baseEmote.name}]")
+                                inlineContentMap[inlineId] = InlineTextContent(
+                                    Placeholder(
+                                        width = widthEmStr,
+                                        height = 2.2.em,
+                                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                                    )
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        for (emote in token.emotes) {
+                                            val webpFiles = emote.data?.host?.files?.filter { it.format.equals("WEBP", ignoreCase = true) }
+                                            val bestFile = if (!webpFiles.isNullOrEmpty()) webpFiles.maxByOrNull { it.width } else emote.data?.host?.files?.maxByOrNull { it.width }
+                                            val fileUrlName = bestFile?.name ?: "4x.webp"
+                                            val imageUrl = "https://cdn.7tv.app/emote/${emote.id}/$fileUrlName"
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(imageUrl)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = emote.name,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             },
-            inlineContent = emotes.associate { (_, match) ->
-                val emoteId = match.groupValues[1]
-                val emoteName = match.groupValues[2]
-                "emote_$emoteId" to InlineTextContent(
-                    Placeholder(
-                        width = 2.em,
-                        height = 2.em,
-                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                    )
-                ) {
-                    val imageUrl = "https://files.kick.com/emotes/$emoteId/fullsize"
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(imageUrl)
-                            .build(),
-                        contentDescription = emoteName,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            },
+            inlineContent = inlineContentMap,
             style = MaterialTheme.typography.bodyMedium
         )
+        }
     }
 }

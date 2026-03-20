@@ -362,6 +362,8 @@ fun ChannelScreen(
                     ) {
                         ChatSection(
                             chatroomId = chatroomId,
+                            kickUserId = channel?.userId,
+                            subscriberBadges = channel?.subscriberBadges ?: emptyList(),
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(vertical = 8.dp)
@@ -400,6 +402,8 @@ fun ChannelScreen(
                             channel?.chatroom?.id?.let { chatroomId ->
                                 ChatSection(
                                     chatroomId = chatroomId,
+                                    kickUserId = channel?.userId,
+                                    subscriberBadges = channel?.subscriberBadges ?: emptyList(),
                                     modifier = Modifier.weight(1f)
                                 )
                             }

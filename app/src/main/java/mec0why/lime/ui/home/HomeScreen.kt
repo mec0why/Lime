@@ -2,8 +2,11 @@ package mec0why.lime.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
@@ -16,9 +19,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import mec0why.lime.ui.components.StreamCard
+import mec0why.lime.ui.theme.LimeGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,13 +36,24 @@ fun HomeScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    PullToRefreshBox(
-        isRefreshing = isLoading && livestreams.isNotEmpty(),
-        onRefresh = viewModel::loadLivestreams,
-        modifier = modifier.fillMaxSize()
-    ) {
-        when {
-            error != null && livestreams.isEmpty() -> {
+    Column(modifier = modifier.fillMaxSize()) {
+        Text(
+            text = "Lime",
+            color = LimeGreen,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        PullToRefreshBox(
+            isRefreshing = isLoading && livestreams.isNotEmpty(),
+            onRefresh = viewModel::loadLivestreams,
+            modifier = Modifier.weight(1f)
+        ) {
+            when {
+                error != null && livestreams.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -76,5 +92,6 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 }

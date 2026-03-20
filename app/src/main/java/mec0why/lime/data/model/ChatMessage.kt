@@ -12,7 +12,20 @@ data class ChatMessageEvent(
     val content: String = "",
     val type: String = "message",
     @SerialName("created_at") val createdAt: String = "",
-    val sender: ChatSender? = null
+    val sender: ChatSender? = null,
+    val metadata: ChatMetadata? = null
+)
+
+@Serializable
+data class ChatMetadata(
+    @SerialName("original_message") val originalMessage: OriginalMessage? = null,
+    @SerialName("original_sender") val originalSender: ChatSender? = null
+)
+
+@Serializable
+data class OriginalMessage(
+    val id: String = "",
+    val content: String = ""
 )
 
 @Serializable

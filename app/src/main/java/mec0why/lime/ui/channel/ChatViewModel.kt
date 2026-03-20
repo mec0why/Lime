@@ -1,6 +1,7 @@
 package mec0why.lime.ui.channel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,8 +9,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import mec0why.lime.LimeApp
 import mec0why.lime.data.model.ChatMessageEvent
 import mec0why.lime.data.model.PusherEvent
+import mec0why.lime.data.model.SevenTVEmote
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -17,10 +20,19 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 
-class ChatViewModel : ViewModel() {
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val sevenTVRepository = (application as LimeApp).sevenTVRepository
 
     private val _messages = MutableStateFlow<List<ChatMessageEvent>>(emptyList())
     val messages: StateFlow<List<ChatMessageEvent>> = _messages
+
+    private val _sevenTvEmotes = MutableStateFlow<Map<String, SevenTVEmote>>(emptyMap())
+    val sevenTvEmotes: StateFlow<Map<String, SevenTVEmote>> = _sevenTvEmotes
+
+    private val _userColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val userColors: StateFlow<Map<String, String>> = _userColors
+
 
     private var webSocket: WebSocket? = null
     private var currentChatroomId: Int? = null
@@ -36,11 +48,21 @@ class ChatViewModel : ViewModel() {
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
-    fun connect(chatroomId: Int) {
+    fun connect(chatroomId: Int, kickUserId: Int?) {
         if (currentChatroomId == chatroomId) return
         disconnect()
         currentChatroomId = chatroomId
         _messages.value = emptyList()
+
+        viewModelScope.launch {
+            val globalEmotes = sevenTVRepository.getGlobalEmotes().getOrDefault(emptyMap())
+            val channelEmotes = if (kickUserId != null) {
+                sevenTVRepository.getChannelEmotes(kickUserId).getOrDefault(emptyMap())
+            } else {
+                emptyMap()
+            }
+            _sevenTvEmotes.value = globalEmotes + channelEmotes
+        }
 
         val request = Request.Builder()
             .url("wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false")
@@ -90,6 +112,14 @@ class ChatViewModel : ViewModel() {
 
     private fun addMessage(message: ChatMessageEvent) {
         viewModelScope.launch {
+            message.sender?.let { sender ->
+                val color = sender.identity?.color
+                if (!color.isNullOrBlank()) {
+                    val currentColors = _userColors.value.toMutableMap()
+                    currentColors[sender.username.lowercase()] = color
+                    _userColors.value = currentColors
+                }
+            }
             val currentList = _messages.value.toMutableList()
             currentList.add(0, message)
             if (currentList.size > 100) {

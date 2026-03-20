@@ -8,8 +8,10 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import kotlinx.serialization.json.Json
 import mec0why.lime.data.api.KickApi
 import mec0why.lime.data.api.KickUnofficialApi
+import mec0why.lime.data.api.SevenTVApi
 import mec0why.lime.data.api.TokenResponse
 import mec0why.lime.data.repository.KickRepository
+import mec0why.lime.data.repository.SevenTVRepository
 import okhttp3.FormBody
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -38,11 +40,15 @@ class LimeApp : Application(), ImageLoaderFactory {
             .okHttpClient(imageClient)
             .components {
                 add(ImageDecoderDecoder.Factory())
+                add(coil.decode.SvgDecoder.Factory())
             }
             .build()
     }
 
     lateinit var repository: KickRepository
+        private set
+
+    lateinit var sevenTVRepository: SevenTVRepository
         private set
 
     private val json = Json {
@@ -132,9 +138,18 @@ class LimeApp : Application(), ImageLoaderFactory {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
 
+        val sevenTvRetrofit = Retrofit.Builder()
+            .baseUrl("https://7tv.io/v3/")
+            .client(unofficialClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+
         val api = officialRetrofit.create(KickApi::class.java)
         val unofficialApi = unofficialRetrofit.create(KickUnofficialApi::class.java)
+        val sevenTvApi = sevenTvRetrofit.create(SevenTVApi::class.java)
+
         repository = KickRepository(api, unofficialApi)
+        sevenTVRepository = SevenTVRepository(sevenTvApi)
         
         coil.Coil.setImageLoader(newImageLoader())
     }
