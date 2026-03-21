@@ -1,8 +1,21 @@
 package mec0why.lime.ui.channel
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.net.Uri
+import android.graphics.drawable.Icon
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +52,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
@@ -57,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,6 +85,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -93,7 +110,7 @@ private fun formatViewersCount(count: Int): String = when {
     else -> count.toString()
 }
 
-@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelScreen(
     onBack: () -> Unit,
@@ -121,6 +138,17 @@ fun ChannelScreen(
     var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
     var selectedTrackName by remember { mutableStateOf("Auto") }
     var userExplicitTrackName by remember { mutableStateOf<String?>(null) }
+    var isInPipMode by remember { mutableStateOf(false) }
+
+    DisposableEffect(activity) {
+        val listener = androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
+            isInPipMode = info.isInPictureInPictureMode
+        }
+        (activity as? androidx.activity.ComponentActivity)?.addOnPictureInPictureModeChangedListener(listener)
+        onDispose {
+            (activity as? androidx.activity.ComponentActivity)?.removeOnPictureInPictureModeChangedListener(listener)
+        }
+    }
 
     DisposableEffect(Unit) {
         val window = activity?.window
@@ -131,10 +159,56 @@ fun ChannelScreen(
     }
 
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("LimeSettings", Context.MODE_PRIVATE)
     
     val ivsPlayer = remember {
         Player.Factory.create(context).apply {
             setLiveLowLatencyEnabled(true)
+        }
+    }
+
+    val mediaSession = remember {
+        MediaSession(context, "LimeChannelSession").apply {
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() { ivsPlayer.play() }
+                override fun onPause() { ivsPlayer.pause() }
+            })
+            isActive = true
+        }
+    }
+
+    val mediaReceiver = remember {
+        object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    "lime.intent.action.PLAY" -> ivsPlayer.play()
+                    "lime.intent.action.PAUSE" -> ivsPlayer.pause()
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaSession.isActive = false
+            mediaSession.release()
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(10101)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val filter = IntentFilter().apply {
+            addAction("lime.intent.action.PLAY")
+            addAction("lime.intent.action.PAUSE")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        }
+        onDispose {
+            context.unregisterReceiver(mediaReceiver)
         }
     }
 
@@ -150,8 +224,8 @@ fun ChannelScreen(
 
     BackHandler(onBack = handleBack)
 
-    LaunchedEffect(isLandscape) {
-        if (isLandscape) isFullscreen = true
+    LaunchedEffect(isLandscape, isInPipMode) {
+        if (isLandscape && !isInPipMode) isFullscreen = true
     }
 
     LaunchedEffect(isFullscreen) {
@@ -219,18 +293,18 @@ fun ChannelScreen(
                 
                 if (isCatchingUp && offsetMs < 1000L) {
                     isCatchingUp = false
-                    ivsPlayer.setPlaybackRate(1.0f)
+                    ivsPlayer.playbackRate = 1.0f
                 }
             } else {
                 streamDelay = "0.0s"
             }
-            
-            kotlinx.coroutines.delay(if (isCatchingUp) 200L else 1000L)
+
+            delay(if (isCatchingUp) 200L else 1000L)
         }
     }
 
-    var videoWidth by remember { mutableStateOf(16) }
-    var videoHeight by remember { mutableStateOf(9) }
+    var videoWidth by remember { mutableIntStateOf(16) }
+    var videoHeight by remember { mutableIntStateOf(9) }
 
     LaunchedEffect(ivsPlayer) {
         val listener = object : Player.Listener() {
@@ -240,7 +314,7 @@ fun ChannelScreen(
                 
                 if (state == Player.State.BUFFERING && isCatchingUp) {
                     isCatchingUp = false
-                    ivsPlayer.setPlaybackRate(1.0f)
+                    ivsPlayer.playbackRate = 1.0f
                 }
                 
                 if (state == Player.State.PLAYING || state == Player.State.READY) {
@@ -249,19 +323,25 @@ fun ChannelScreen(
                     qualities.forEachIndexed { index, quality ->
                         newTracks.add(VideoTrackInfo(quality.name, index))
                     }
+                    val previousTracksSize = availableTracks.size
                     availableTracks = newTracks.distinctBy { it.name }
                         .sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
                         
-                    if (ivsPlayer.isAutoQualityMode) {
-                        if (ivsPlayer.quality != null) {
-                            selectedTrackName = "Auto: ${ivsPlayer.quality.name}"
-                        } else {
-                            selectedTrackName = "Auto"
+                    if (previousTracksSize == 0 && availableTracks.isNotEmpty()) {
+                        val saved = prefs.getString("selectedQuality", "Auto") ?: "Auto"
+                        if (saved != "Auto") {
+                            val quality = qualities.find { it.name == saved }
+                            if (quality != null) {
+                                ivsPlayer.quality = quality
+                                ivsPlayer.isAutoQualityMode = false
+                            }
                         }
+                    }
+
+                    selectedTrackName = if (ivsPlayer.isAutoQualityMode) {
+                        "Auto: ${ivsPlayer.quality.name}"
                     } else {
-                        if (ivsPlayer.quality != null) {
-                            selectedTrackName = ivsPlayer.quality.name
-                        }
+                        ivsPlayer.quality.name
                     }
                 }
             }
@@ -273,10 +353,10 @@ fun ChannelScreen(
                 }
             }
             override fun onQualityChanged(quality: com.amazonaws.ivs.player.Quality) {
-                if (ivsPlayer.isAutoQualityMode) {
-                    selectedTrackName = "Auto: ${quality.name}"
+                selectedTrackName = if (ivsPlayer.isAutoQualityMode) {
+                    "Auto: ${quality.name}"
                 } else {
-                    selectedTrackName = quality.name
+                    quality.name
                 }
             }
             override fun onDurationChanged(duration: Long) {}
@@ -297,8 +377,70 @@ fun ChannelScreen(
 
     LaunchedEffect(playbackUrl) {
         playbackUrl?.let { url ->
-            ivsPlayer.load(Uri.parse(url))
+            ivsPlayer.load(url.toUri())
             ivsPlayer.play()
+        }
+    }
+
+    LaunchedEffect(isPlaying, isBuffering, channel) {
+        if (!isClosing) {
+            val playbackState = if (isPlaying) PlaybackState.STATE_PLAYING 
+                else if (isBuffering) PlaybackState.STATE_BUFFERING 
+                else PlaybackState.STATE_PAUSED
+            
+            mediaSession.setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE)
+                    .setState(playbackState, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                    .build()
+            )
+            
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "lime_media_playback"
+            val c = NotificationChannel(channelId, "Subscribed Streams", NotificationManager.IMPORTANCE_LOW)
+            nm.createNotificationChannel(c)
+
+            val playIntent = PendingIntent.getBroadcast(
+                context, 0, Intent("lime.intent.action.PLAY").setPackage(context.packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val pauseIntent = PendingIntent.getBroadcast(
+                context, 1, Intent("lime.intent.action.PAUSE").setPackage(context.packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val action = if (isPlaying) {
+                Notification.Action.Builder(
+                    Icon.createWithResource(context, android.R.drawable.ic_media_pause), "Pause", pauseIntent
+                ).build()
+            } else {
+                Notification.Action.Builder(
+                    Icon.createWithResource(context, android.R.drawable.ic_media_play), "Play", playIntent
+                ).build()
+            }
+            
+            val title = channel?.livestream?.sessionTitle ?: "Live"
+            val artist = channel?.user?.username ?: "Lime Stream"
+            
+            mediaSession.setMetadata(
+                MediaMetadata.Builder()
+                    .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+                    .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
+                    .build()
+            )
+            
+            val notification = Notification.Builder(context, channelId)
+                .setSmallIcon(context.applicationInfo.icon)
+                .setContentTitle(title)
+                .setContentText(artist)
+                .setOngoing(isPlaying)
+                .setStyle(
+                    Notification.MediaStyle()
+                        .setMediaSession(mediaSession.sessionToken)
+                        .setShowActionsInCompactView(0)
+                )
+                .addAction(action)
+                .build()
+            nm.notify(10101, notification)
         }
     }
 
@@ -310,7 +452,9 @@ fun ChannelScreen(
         val screenWidthPx = constraints.maxWidth.toFloat()
         val screenWidth = maxWidth
         
-        if (isFullscreen && !isClosing) {
+        if (isInPipMode) {
+            // Minimal UI, only video is visible
+        } else if (isFullscreen && !isClosing) {
             if (showChatOverlay) {
                 val boundaryX = maxWidth * (1f - chatWidthFraction)
                 
@@ -412,8 +556,14 @@ fun ChannelScreen(
                 }
             }
         }
-        
-        val videoLayerModifier = if (isFullscreen && !isClosing) {
+
+        val videoLayerModifier = if (isInPipMode) {
+            Modifier
+                .align(Alignment.Center)
+                .fillMaxSize()
+                .background(Color.Black)
+                .zIndex(3f)
+        } else if (isFullscreen && !isClosing) {
             Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
@@ -433,7 +583,9 @@ fun ChannelScreen(
         Box(
             modifier = videoLayerModifier
                 .pointerInput(Unit) {
-                    detectTapGestures { showControls = !showControls }
+                    if (!isInPipMode) {
+                        detectTapGestures { showControls = !showControls }
+                    }
                 }
         ) {
             if (isClosing) {
@@ -479,7 +631,7 @@ fun ChannelScreen(
                 }
                 
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = showControls,
+                    visible = showControls && !isInPipMode,
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
@@ -533,7 +685,7 @@ fun ChannelScreen(
                             IconButton(
                                 onClick = {
                                     isCatchingUp = !isCatchingUp
-                                    ivsPlayer.setPlaybackRate(if (isCatchingUp) 1.1f else 1.0f)
+                                    ivsPlayer.playbackRate = if (isCatchingUp) 1.1f else 1.0f
                                 }
                             ) {
                                 Icon(
@@ -594,6 +746,21 @@ fun ChannelScreen(
                                         tint = if (showChatOverlay) Color.White else Color.White.copy(alpha = 0.5f)
                                     )
                                 }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    val params = PictureInPictureParams.Builder()
+                                        .setAspectRatio(android.util.Rational(16, 9))
+                                        .build()
+                                    activity?.enterPictureInPictureMode(params)
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PictureInPictureAlt,
+                                    contentDescription = "Picture in Picture",
+                                    tint = Color.White
+                                )
                             }
 
                             IconButton(
@@ -673,17 +840,14 @@ fun ChannelScreen(
                             .fillMaxWidth()
                             .clickable {
                                 userExplicitTrackName = option
+                                prefs.edit { putString("selectedQuality", option) }
                                 if (option == "Auto") {
                                     ivsPlayer.isAutoQualityMode = true
-                                    if (ivsPlayer.quality != null) {
-                                        selectedTrackName = "Auto: ${ivsPlayer.quality.name}"
-                                    } else {
-                                        selectedTrackName = "Auto"
-                                    }
+                                    selectedTrackName = "Auto: ${ivsPlayer.quality.name}"
                                 } else {
                                     val quality = ivsPlayer.qualities.find { it.name == option }
                                     if (quality != null) {
-                                        ivsPlayer.setQuality(quality)
+                                        ivsPlayer.quality = quality
                                         selectedTrackName = option
                                     }
                                 }
