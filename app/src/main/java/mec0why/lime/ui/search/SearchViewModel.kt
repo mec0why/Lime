@@ -41,13 +41,13 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         searchJob = viewModelScope.launch {
+            _isLoading.value = true
             delay(500)
             searchChannels(query)
         }
     }
 
     private suspend fun searchChannels(query: String) {
-        _isLoading.value = true
         _error.value = null
 
         repository.searchChannels(query).fold(

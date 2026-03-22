@@ -10,6 +10,7 @@ import mec0why.lime.data.api.KickApi
 import mec0why.lime.data.api.KickUnofficialApi
 import mec0why.lime.data.api.SevenTVApi
 import mec0why.lime.data.api.TokenResponse
+import mec0why.lime.data.repository.FollowingRepository
 import mec0why.lime.data.repository.KickRepository
 import mec0why.lime.data.repository.SevenTVRepository
 import okhttp3.FormBody
@@ -51,6 +52,9 @@ class LimeApp : Application(), ImageLoaderFactory {
     lateinit var sevenTVRepository: SevenTVRepository
         private set
 
+    lateinit var followingRepository: FollowingRepository
+        private set
+
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
@@ -79,7 +83,7 @@ class LimeApp : Application(), ImageLoaderFactory {
             val body = response.body.string()
             val tokenResponse = json.decodeFromString<TokenResponse>(body)
             tokenResponse.accessToken
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             ""
         }
     }
@@ -150,6 +154,7 @@ class LimeApp : Application(), ImageLoaderFactory {
 
         repository = KickRepository(api, unofficialApi)
         sevenTVRepository = SevenTVRepository(sevenTvApi)
+        followingRepository = FollowingRepository(this)
         
         coil.Coil.setImageLoader(newImageLoader())
     }

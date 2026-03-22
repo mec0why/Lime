@@ -68,9 +68,9 @@ import java.util.UUID
 @Composable
 fun ChatSection(
     chatroomId: Int,
+    modifier: Modifier = Modifier,
     kickUserId: Int? = null,
     subscriberBadges: List<mec0why.lime.data.model.SubscriberBadge> = emptyList(),
-    modifier: Modifier = Modifier,
     viewModel: ChatViewModel = viewModel()
 ) {
     val messages by viewModel.messages.collectAsState()
@@ -115,7 +115,7 @@ fun ChatSection(
             modifier = Modifier.fillMaxSize(),
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
         ) {
             items(messages, key = { it.id }) { message ->
                 ChatMessageItem(
@@ -179,6 +179,7 @@ fun ChatSection(
 @Composable
 fun ChatMessageItem(
     message: ChatMessageEvent,
+    modifier: Modifier = Modifier,
     sevenTvEmotes: Map<String, SevenTVEmote> = emptyMap(),
     userColors: Map<String, String> = emptyMap(),
     subscriberBadges: List<mec0why.lime.data.model.SubscriberBadge> = emptyList()
@@ -190,7 +191,7 @@ fun ChatMessageItem(
         } else {
             Color.White
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         Color.White
     }
 
@@ -200,7 +201,7 @@ fun ChatMessageItem(
     }
 
     Column(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 2.dp)
     ) {
         if (message.type == "reply" && message.metadata?.originalSender != null) {
             Row(
@@ -239,14 +240,18 @@ fun ChatMessageItem(
                             placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
                         )
                     ) {
-                        val imageUrl = if (badge.type == "subscriber") {
-                            val sortedBadges = subscriberBadges.sortedByDescending { it.months }
-                            val bestBadge = sortedBadges.firstOrNull { badge.count >= it.months }
-                            bestBadge?.badgeImage?.src ?: "https://cdn.kicktalk.app/Badges/subscriber.svg"
-                        } else if (badge.type == "sub_gifter") {
-                            "https://cdn.kicktalk.app/Badges/subgifter1.svg"
-                        } else {
-                            "https://cdn.kicktalk.app/Badges/${badge.type}.svg"
+                        val imageUrl = when (badge.type) {
+                            "subscriber" -> {
+                                val sortedBadges = subscriberBadges.sortedByDescending { it.months }
+                                val bestBadge = sortedBadges.firstOrNull { badge.count >= it.months }
+                                bestBadge?.badgeImage?.src ?: "https://cdn.kicktalk.app/Badges/subscriber.svg"
+                            }
+                            "sub_gifter" -> {
+                                "https://cdn.kicktalk.app/Badges/subgifter1.svg"
+                            }
+                            else -> {
+                                "https://cdn.kicktalk.app/Badges/${badge.type}.svg"
+                            }
                         }
                         
                         AsyncImage(
@@ -279,7 +284,7 @@ fun ChatMessageItem(
                                     } else {
                                         LimeGreen
                                     }
-                                } catch (e: Exception) {
+                                } catch (_: Exception) {
                                     LimeGreen
                                 }
                                 withStyle(style = SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {

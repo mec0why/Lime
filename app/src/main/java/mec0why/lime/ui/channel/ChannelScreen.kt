@@ -81,8 +81,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.core.content.edit
@@ -114,30 +114,27 @@ private fun formatViewersCount(count: Int): String = when {
 @Composable
 fun ChannelScreen(
     onBack: () -> Unit,
-    modifier: Modifier = Modifier,
     viewModel: ChannelViewModel = viewModel()
 ) {
     val channel by viewModel.channel.collectAsState()
     val playbackUrl by viewModel.playbackUrl.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
-    val slug by viewModel.slugFlow.collectAsState()
+    val isFollowing by viewModel.isFollowing.collectAsState()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val activity = androidx.activity.compose.LocalActivity.current
-    val windowInfo = LocalWindowInfo.current
 
     var isFullscreen by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     var showChatOverlay by remember { mutableStateOf(true) }
     var isClosing by remember { mutableStateOf(false) }
-    var chatWidthFraction by remember { mutableFloatStateOf(0.30f) }
+    var chatWidthFraction by remember { mutableFloatStateOf(0.25f) }
     var isResizing by remember { mutableStateOf(false) }
 
     var showSettingsSheet by remember { mutableStateOf(false) }
     var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
     var selectedTrackName by remember { mutableStateOf("Auto") }
-    var userExplicitTrackName by remember { mutableStateOf<String?>(null) }
     var isInPipMode by remember { mutableStateOf(false) }
 
     DisposableEffect(activity) {
@@ -213,7 +210,9 @@ fun ChannelScreen(
     }
 
     val handleBack = {
-        if (isFullscreen) {
+        if (showSettingsSheet) {
+            showSettingsSheet = false
+        } else if (isFullscreen) {
             isFullscreen = false
         } else {
             isClosing = true
@@ -450,8 +449,7 @@ fun ChannelScreen(
         modifier = Modifier.fillMaxSize().background(DarkBackground)
     ) {
         val screenWidthPx = constraints.maxWidth.toFloat()
-        val screenWidth = maxWidth
-        
+
         if (isInPipMode) {
             // Minimal UI, only video is visible
         } else if (isFullscreen && !isClosing) {
@@ -476,7 +474,7 @@ fun ChannelScreen(
                                     showControls = true
                                     change.consume()
                                     val dragFraction = dragAmount / screenWidthPx
-                                    chatWidthFraction = (chatWidthFraction - dragFraction).coerceIn(0.2f, 0.6f)
+                                    chatWidthFraction = (chatWidthFraction - dragFraction).coerceIn(0.2f, 0.5f)
                                 }
                             )
                         }
@@ -536,11 +534,11 @@ fun ChannelScreen(
                                     .aspectRatio(16f / 9f)
                             )
                             
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
                             StreamDetailsSection(
                                 channel = channel,
-                                showControls = showControls
+                                showControls = showControls,
+                                isFollowing = isFollowing,
+                                onFollowToggle = { viewModel.toggleFollow() }
                             )
 
                             channel?.chatroom?.id?.let { chatroomId ->
@@ -657,6 +655,62 @@ fun ChannelScreen(
                                     tint = Color.White
                                 )
                             }
+
+                            if (isFullscreen) {
+                                channel?.livestream?.let { live ->
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(start = 8.dp, end = 120.dp)
+                                            .weight(1f, fill = false)
+                                    ) {
+                                        Text(
+                                            text = live.sessionTitle,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = channel?.user?.username ?: "",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = Color.White.copy(alpha = 0.8f),
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                            if (channel?.verified == true) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .background(LimeGreen, androidx.compose.foundation.shape.CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "✓",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                                        color = Color.Black
+                                                    )
+                                                }
+                                            }
+                                            if (live.categories.isNotEmpty()) {
+                                                Text(
+                                                    text = live.categories.first().name,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White,
+                                                    modifier = Modifier
+                                                        .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                    maxLines = 1,
+                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         if (!isBuffering) {
@@ -683,19 +737,6 @@ fun ChannelScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(
-                                onClick = {
-                                    isCatchingUp = !isCatchingUp
-                                    ivsPlayer.playbackRate = if (isCatchingUp) 1.1f else 1.0f
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.FastForward,
-                                    contentDescription = "Catch up latency",
-                                    tint = if (isCatchingUp) LimeGreen else Color.White
-                                )
-                            }
-
-                            IconButton(
                                 onClick = { showSettingsSheet = true }
                             ) {
                                 Icon(
@@ -715,16 +756,16 @@ fun ChannelScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Icon(imageVector = Icons.Filled.Timer, contentDescription = "Uptime", tint = LimeGreen, modifier = Modifier.size(14.dp))
                                 Text(text = streamUptime, color = Color.White, style = MaterialTheme.typography.labelSmall)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Icon(imageVector = Icons.Filled.Speed, contentDescription = "Delay", tint = LimeGreen, modifier = Modifier.size(14.dp))
                                 Text(text = streamDelay, color = Color.White, style = MaterialTheme.typography.labelSmall)
                             }
                             channel?.livestream?.viewerCount?.let { count ->
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Icon(imageVector = Icons.Filled.Person, contentDescription = "Viewers", tint = LimeGreen, modifier = Modifier.size(14.dp))
                                     Text(text = formatViewersCount(count), color = Color.White, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
@@ -736,6 +777,19 @@ fun ChannelScreen(
                                 .padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            IconButton(
+                                onClick = {
+                                    isCatchingUp = !isCatchingUp
+                                    ivsPlayer.playbackRate = if (isCatchingUp) 1.1f else 1.0f
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.FastForward,
+                                    contentDescription = "Catch up latency",
+                                    tint = if (isCatchingUp) LimeGreen else Color.White
+                                )
+                            }
+
                             if (isFullscreen) {
                                 IconButton(
                                     onClick = { showChatOverlay = !showChatOverlay }
@@ -839,7 +893,6 @@ fun ChannelScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                userExplicitTrackName = option
                                 prefs.edit { putString("selectedQuality", option) }
                                 if (option == "Auto") {
                                     ivsPlayer.isAutoQualityMode = true

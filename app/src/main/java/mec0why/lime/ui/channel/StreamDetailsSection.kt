@@ -26,15 +26,14 @@ import coil.compose.AsyncImage
 import mec0why.lime.data.model.ChannelResponse
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.LimeGreen
-import mec0why.lime.ui.theme.LiveRed
 import mec0why.lime.ui.theme.TextPrimary
-import mec0why.lime.ui.theme.TextSecondary
-import mec0why.lime.ui.theme.TextTertiary
 
 @Composable
 fun StreamDetailsSection(
     channel: ChannelResponse?,
     showControls: Boolean,
+    isFollowing: Boolean,
+    onFollowToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
@@ -61,11 +60,29 @@ fun StreamDetailsSection(
                 )
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = channel?.user?.username ?: "",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = TextPrimary
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = channel?.user?.username ?: "",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = TextPrimary
+                        )
+
+                        if (channel?.verified == true) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .size(18.dp)
+                                    .background(LimeGreen, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "✓",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = DarkBackground
+                                )
+                            }
+                        }
+                    }
 
                     channel?.livestream?.let { live ->
                         Row(
@@ -75,32 +92,36 @@ fun StreamDetailsSection(
                             Text(
                                 text = "● LIVE",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = LiveRed
+                                color = LimeGreen
                             )
-                            Text(
-                                text = "${formatViewers(live.viewerCount)} viewers",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextTertiary
-                            )
+                            if (live.categories.isNotEmpty()) {
+                                live.categories.forEach { cat ->
+                                    Text(
+                                        text = cat.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = LimeGreen,
+                                        modifier = Modifier
+                                            .background(
+                                                LimeGreen.copy(alpha = 0.15f),
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                if (channel?.verified == true) {
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                LimeGreen,
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "✓",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = DarkBackground
-                        )
-                    }
+                androidx.compose.material3.TextButton(
+                    onClick = onFollowToggle,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = if (isFollowing) TextPrimary else DarkBackground,
+                        containerColor = if (isFollowing) DarkBackground else LimeGreen
+                    ),
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    Text(if (isFollowing) "Unfollow" else "Follow")
                 }
             }
 
@@ -110,41 +131,7 @@ fun StreamDetailsSection(
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary
                 )
-
-                if (live.categories.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        live.categories.forEach { cat ->
-                            Text(
-                                text = cat.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LimeGreen,
-                                modifier = Modifier
-                                    .background(
-                                        LimeGreen.copy(alpha = 0.15f),
-                                        RoundedCornerShape(4.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            channel?.user?.bio?.let { bio ->
-                if (bio.isNotBlank()) {
-                    Text(
-                        text = bio,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                }
             }
         }
     }
-}
-
-private fun formatViewers(count: Int): String = when {
-    count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
-    count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", count / 1_000.0)
-    else -> count.toString()
 }

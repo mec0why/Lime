@@ -16,9 +16,11 @@ class ChannelViewModel(
 ) : AndroidViewModel(application) {
 
     private val repository = (application as LimeApp).repository
+    private val followingRepository = (application as LimeApp).followingRepository
     private val slug: String = savedStateHandle.get<String>("slug") ?: ""
 
-    val slugFlow: StateFlow<String> = MutableStateFlow(slug)
+    private val _isFollowing = MutableStateFlow(followingRepository.isFollowing(slug))
+    val isFollowing: StateFlow<Boolean> = _isFollowing
 
     private val _channel = MutableStateFlow<ChannelResponse?>(null)
     val channel: StateFlow<ChannelResponse?> = _channel
@@ -47,6 +49,12 @@ class ChannelViewModel(
                 }
             }
         }
+    }
+
+    fun toggleFollow() {
+        if (slug.isBlank()) return
+        followingRepository.toggleFollow(slug)
+        _isFollowing.value = followingRepository.isFollowing(slug)
     }
 
     fun loadChannel() {

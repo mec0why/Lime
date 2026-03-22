@@ -19,8 +19,7 @@ object VerifiedSerializer : KSerializer<Boolean> {
     override fun deserialize(decoder: Decoder): Boolean {
         val input = decoder as? JsonDecoder ?: return false
         return try {
-            val element = input.decodeJsonElement()
-            when (element) {
+            when (val element = input.decodeJsonElement()) {
                 is JsonPrimitive -> {
                     if (element.isString) {
                         element.content.lowercase() == "true" || element.content == "1"
@@ -31,7 +30,7 @@ object VerifiedSerializer : KSerializer<Boolean> {
                 is JsonObject -> true
                 else -> false
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -47,8 +46,7 @@ object LiveStatusSerializer : KSerializer<Boolean> {
     override fun deserialize(decoder: Decoder): Boolean {
         val input = decoder as? JsonDecoder ?: return false
         return try {
-            val element = input.decodeJsonElement()
-            when (element) {
+            when (val element = input.decodeJsonElement()) {
                 is JsonPrimitive -> {
                     if (element.isString) {
                         element.content.lowercase() == "true" || element.content == "1"
@@ -58,7 +56,7 @@ object LiveStatusSerializer : KSerializer<Boolean> {
                 }
                 else -> false
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -121,7 +119,14 @@ data class ChannelLivestream(
     @SerialName("created_at") val createdAt: String = "",
     val categories: List<RecentCategory> = emptyList(),
     @SerialName("is_mature") val isMature: Boolean = false,
-    @Serializable(with = LiveStatusSerializer::class) @SerialName("is_live") val isLive: Boolean = false
+    @Serializable(with = LiveStatusSerializer::class) @SerialName("is_live") val isLive: Boolean = false,
+    val thumbnail: ChannelThumbnail? = null
+)
+
+@Serializable
+data class ChannelThumbnail(
+    val url: String? = null,
+    val src: String? = null
 )
 
 @Serializable

@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -40,7 +41,6 @@ import mec0why.lime.data.model.SearchChannel
 import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.DarkSurfaceVariant
 import mec0why.lime.ui.theme.LimeGreen
-import mec0why.lime.ui.theme.LiveRed
 import mec0why.lime.ui.theme.TextPrimary
 import mec0why.lime.ui.theme.TextSecondary
 
@@ -56,6 +56,16 @@ fun SearchScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
+        Text(
+            text = "Search",
+            color = LimeGreen,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
         TextField(
             value = searchQuery,
             onValueChange = viewModel::onSearchQueryChanged,
@@ -78,7 +88,7 @@ fun SearchScreen(
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
         when {
@@ -179,11 +189,12 @@ fun SearchChannelItem(
                     color = TextPrimary
                 )
                 if (channel.verified || channel.user?.verified == true) {
-                    Spacer(modifier = Modifier.width(4.dp))
                     Box(
                         modifier = Modifier
-                            .background(LimeGreen, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .padding(start = 8.dp)
+                            .size(18.dp)
+                            .background(LimeGreen, CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "✓",
@@ -199,7 +210,7 @@ fun SearchChannelItem(
                 Text(
                     text = "● LIVE",
                     style = MaterialTheme.typography.labelSmall,
-                    color = LiveRed
+                    color = LimeGreen
                 )
             }
         }
