@@ -2,10 +2,13 @@ package mec0why.lime.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import androidx.core.content.edit
+import kotlinx.coroutines.launch
 
 class FollowingRepository(context: Context) {
 
@@ -15,7 +18,9 @@ class FollowingRepository(context: Context) {
     val followedChannels: StateFlow<Set<String>> = _followedChannels.asStateFlow()
 
     init {
-        _followedChannels.value = prefs.getStringSet("channels", emptySet())?.toSet() ?: emptySet()
+        CoroutineScope(Dispatchers.IO).launch {
+            _followedChannels.value = prefs.getStringSet("channels", emptySet())?.toSet() ?: emptySet()
+        }
     }
 
     fun isFollowing(slug: String): Boolean {
@@ -43,7 +48,9 @@ class FollowingRepository(context: Context) {
     }
 
     private fun saveChannels(channels: Set<String>) {
-        prefs.edit { putStringSet("channels", channels) }
         _followedChannels.value = channels
+        CoroutineScope(Dispatchers.IO).launch {
+            prefs.edit { putStringSet("channels", channels) }
+        }
     }
 }

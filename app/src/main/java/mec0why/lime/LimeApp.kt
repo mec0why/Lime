@@ -4,6 +4,8 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.ImageDecoderDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import mec0why.lime.data.api.KickApi
@@ -13,11 +15,15 @@ import mec0why.lime.data.api.TokenResponse
 import mec0why.lime.data.repository.FollowingRepository
 import mec0why.lime.data.repository.KickRepository
 import mec0why.lime.data.repository.SevenTVRepository
+import okhttp3.Authenticator
+import okhttp3.Cache
 import okhttp3.FormBody
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.Route
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
@@ -39,6 +45,17 @@ class LimeApp : Application(), ImageLoaderFactory {
 
         return ImageLoader.Builder(this)
             .okHttpClient(imageClient)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.04)
+                    .build()
+            }
             .components {
                 add(ImageDecoderDecoder.Factory())
                 add(coil.decode.SvgDecoder.Factory())
@@ -95,6 +112,41 @@ class LimeApp : Application(), ImageLoaderFactory {
             level = HttpLoggingInterceptor.Level.BASIC
         }
 
+        val cacheSize = (10 * 1024 * 1024).toLong()
+        val cache = Cache(cacheDir, cacheSize)
+
+        val onlineCacheInterceptor = Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            val maxAge = 60
+            response.newBuilder()
+                .header("Cache-Control", "public, max-age=$maxAge")
+                .removeHeader("Pragma")
+                .build()
+        }
+
+        val authenticator = object : Authenticator {
+            override fun authenticate(route: Route?, response: Response): Request? {
+                if (response.request.header("Authorization") != null && response.code == 401) {
+                    synchronized(this) {
+                        val currentToken = accessToken
+                        val requestToken = response.request.header("Authorization")?.removePrefix("Bearer ")
+                        val newToken = if (currentToken != null && currentToken != requestToken) {
+                            currentToken
+                        } else {
+                            fetchToken().also { accessToken = it }
+                        }
+                        
+                        if (newToken.isNotEmpty()) {
+                            return response.request.newBuilder()
+                                .header("Authorization", "Bearer $newToken")
+                                .build()
+                        }
+                    }
+                }
+                return null
+            }
+        }
+
         val authInterceptor = Interceptor { chain ->
             val token = accessToken ?: synchronized(this) {
                 accessToken ?: fetchToken().also { accessToken = it }
@@ -108,7 +160,10 @@ class LimeApp : Application(), ImageLoaderFactory {
         }
 
         val officialClient = OkHttpClient.Builder()
+            .cache(cache)
+            .addNetworkInterceptor(onlineCacheInterceptor)
             .addInterceptor(authInterceptor)
+            .authenticator(authenticator)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -130,6 +185,8 @@ class LimeApp : Application(), ImageLoaderFactory {
         }
 
         val unofficialClient = OkHttpClient.Builder()
+            .cache(cache)
+            .addNetworkInterceptor(onlineCacheInterceptor)
             .addInterceptor(unofficialHeaderInterceptor)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)

@@ -31,12 +31,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,28 +83,29 @@ fun ChatSection(
     }
 
     val listState = rememberLazyListState()
-    val isBottomVisible by remember {
-        derivedStateOf {
-            listState.firstVisibleItemIndex <= 3
-        }
-    }
-    
+    var userPausedScroll by remember { mutableStateOf(false) }
     var unreadCount by remember { mutableIntStateOf(0) }
-    
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { index ->
+                if (index > 0) {
+                    userPausedScroll = true
+                } else {
+                    userPausedScroll = false
+                    unreadCount = 0
+                }
+            }
+    }
+
     LaunchedEffect(messages) {
         if (messages.isNotEmpty()) {
-            if (isBottomVisible) {
+            if (!userPausedScroll) {
                 listState.scrollToItem(0)
                 unreadCount = 0
             } else {
                 unreadCount++
             }
-        }
-    }
-
-    LaunchedEffect(isBottomVisible) {
-        if (isBottomVisible) {
-            unreadCount = 0
         }
     }
 
@@ -128,7 +130,7 @@ fun ChatSection(
         }
 
         AnimatedVisibility(
-            visible = !isBottomVisible,
+            visible = userPausedScroll,
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut(),
             modifier = Modifier
@@ -141,7 +143,9 @@ fun ChatSection(
                     .clip(CircleShape)
                     .clickable {
                         scope.launch {
-                            listState.animateScrollToItem(0)
+                            userPausedScroll = false
+                            unreadCount = 0
+                            listState.scrollToItem(0)
                         }
                     }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -257,7 +261,6 @@ fun ChatMessageItem(
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
                                 .data(imageUrl)
-                                .crossfade(true)
                                 .build(),
                             contentDescription = badge.text,
                             modifier = Modifier.fillMaxSize()
@@ -317,7 +320,6 @@ fun ChatMessageItem(
                                     AsyncImage(
                                         model = ImageRequest.Builder(LocalContext.current)
                                             .data(imageUrl)
-                                            .crossfade(true)
                                             .build(),
                                         contentDescription = token.name,
                                         modifier = Modifier.fillMaxSize()
@@ -348,7 +350,6 @@ fun ChatMessageItem(
                                             AsyncImage(
                                                 model = ImageRequest.Builder(LocalContext.current)
                                                     .data(imageUrl)
-                                                    .crossfade(true)
                                                     .build(),
                                                 contentDescription = emote.name,
                                                 modifier = Modifier.fillMaxSize()

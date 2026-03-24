@@ -13,16 +13,19 @@ sealed class ChatToken {
 }
 
 object ChatParser {
+    
+    private val emoteRegex = Regex("\\[emote:(\\d+):([^\\]]+)\\]")
+    private val linkRegex = Regex("(https?://\\S+)")
+    private val whitespaceRegex = Regex("(\\s+)")
+    private val wordRegex = Regex("\\S+")
+
     fun parseMessage(
         content: String,
         sevenTvMap: Map<String, SevenTVEmote>
     ): List<ChatToken> {
         val tokens = mutableListOf<ChatToken>()
         
-        val emoteRegex = Regex("\\[emote:(\\d+):([^\\]]+)\\]")
-        val linkRegex = Regex("(https?://\\S+)")
-        
-        val systemMatches = (emoteRegex.findAll(content).map { it.range.first to it } + 
+        val systemMatches = (emoteRegex.findAll(content).map { it.range.first to it } +
                 linkRegex.findAll(content).map { it.range.first to it })
                 .sortedBy { it.first }
                 .map { it.second }
@@ -54,10 +57,8 @@ object ChatParser {
         sevenTvMap: Map<String, SevenTVEmote>,
         tokens: MutableList<ChatToken>
     ) {
-        val whitespaceRegex = Regex("(\\s+)")
         val parts = text.split(whitespaceRegex)
         var currentIndex = 0
-        val wordRegex = Regex("\\S+")
         val words = wordRegex.findAll(text)
         
         for (wordMatch in words) {

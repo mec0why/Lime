@@ -3,8 +3,10 @@ package mec0why.lime.ui.channel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -33,9 +35,56 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _userColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val userColors: StateFlow<Map<String, String>> = _userColors
 
+    private val messageBuffer = Channel<ChatMessageEvent>(Channel.UNLIMITED)
 
     private var webSocket: WebSocket? = null
     private var currentChatroomId: Int? = null
+
+    init {
+        viewModelScope.launch {
+            val buffer = mutableListOf<ChatMessageEvent>()
+            messageBuffer.receiveAsFlow().collect { msg ->
+                buffer.add(msg)
+
+                val hasMore = !messageBuffer.isEmpty
+                if (!hasMore || buffer.size >= 25) {
+                    flushBuffer(buffer)
+                }
+            }
+        }
+    }
+
+    private fun flushBuffer(buffer: MutableList<ChatMessageEvent>) {
+        if (buffer.isEmpty()) return
+        
+        val colorsUpdate = mutableMapOf<String, String>()
+        buffer.forEach { message ->
+            message.sender?.let { sender ->
+                val color = sender.identity?.color
+                if (!color.isNullOrBlank()) {
+                    colorsUpdate[sender.username.lowercase()] = color
+                }
+            }
+        }
+        
+        if (colorsUpdate.isNotEmpty()) {
+            val currentColors = _userColors.value.toMutableMap()
+            currentColors.putAll(colorsUpdate)
+            _userColors.value = currentColors
+        }
+        
+        val currentList = _messages.value.toMutableList()
+        currentList.addAll(0, buffer)
+        
+        if (currentList.size > 100) {
+            val toKeep = currentList.subList(0, 100)
+            _messages.value = toKeep.toList()
+        } else {
+            _messages.value = currentList
+        }
+        
+        buffer.clear()
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -79,14 +128,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     if (pusherEvent.event == "App\\Events\\ChatMessageEvent" && pusherEvent.data != null) {
                         val dataString = try {
                             pusherEvent.data.jsonPrimitive.contentOrNull ?: pusherEvent.data.toString()
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             pusherEvent.data.toString()
                         }
                         
                         val messageEvent = json.decodeFromString<ChatMessageEvent>(dataString)
-                        addMessage(messageEvent)
+                        messageBuffer.trySend(messageEvent)
                     }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     // Ignore parse errors silently
                 }
             }
@@ -108,25 +157,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         """.trimIndent()
         webSocket.send(jsonPayload)
-    }
-
-    private fun addMessage(message: ChatMessageEvent) {
-        viewModelScope.launch {
-            message.sender?.let { sender ->
-                val color = sender.identity?.color
-                if (!color.isNullOrBlank()) {
-                    val currentColors = _userColors.value.toMutableMap()
-                    currentColors[sender.username.lowercase()] = color
-                    _userColors.value = currentColors
-                }
-            }
-            val currentList = _messages.value.toMutableList()
-            currentList.add(0, message)
-            if (currentList.size > 100) {
-                currentList.removeAt(currentList.lastIndex)
-            }
-            _messages.value = currentList
-        }
     }
 
     fun disconnect() {
