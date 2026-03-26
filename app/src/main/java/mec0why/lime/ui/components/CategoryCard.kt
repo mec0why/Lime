@@ -1,5 +1,6 @@
 package mec0why.lime.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -17,7 +18,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import mec0why.lime.data.model.Category
 import mec0why.lime.ui.theme.DarkCard
 import mec0why.lime.ui.theme.TextPrimary
@@ -35,14 +36,27 @@ fun CategoryCard(
         colors = CardDefaults.cardColors(containerColor = DarkCard)
     ) {
         Column {
-            AsyncImage(
-                model = category.thumbnail.ifEmpty { null },
+            SubcomposeAsyncImage(
+                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    .data(category.thumbnail.ifEmpty { null })
+                    .crossfade(true)
+                    .build(),
                 contentDescription = category.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)),
+                loading = {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(3f/4f).shimmerEffect()
+                    )
+                },
+                error = {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(3f/4f).background(androidx.compose.ui.graphics.Color.DarkGray)
+                    )
+                }
             )
 
             Text(

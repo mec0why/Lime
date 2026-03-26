@@ -12,6 +12,7 @@ import mec0why.lime.data.api.KickApi
 import mec0why.lime.data.api.KickUnofficialApi
 import mec0why.lime.data.api.SevenTVApi
 import mec0why.lime.data.api.TokenResponse
+import mec0why.lime.data.repository.ChannelHydrator
 import mec0why.lime.data.repository.FollowingRepository
 import mec0why.lime.data.repository.KickRepository
 import mec0why.lime.data.repository.SevenTVRepository
@@ -70,6 +71,9 @@ class LimeApp : Application(), ImageLoaderFactory {
         private set
 
     lateinit var followingRepository: FollowingRepository
+        private set
+
+    lateinit var channelHydrator: ChannelHydrator
         private set
 
     private val json = Json {
@@ -212,6 +216,7 @@ class LimeApp : Application(), ImageLoaderFactory {
         repository = KickRepository(api, unofficialApi)
         sevenTVRepository = SevenTVRepository(sevenTvApi)
         followingRepository = FollowingRepository(this)
+        channelHydrator = ChannelHydrator(repository, this)
         
         coil.Coil.setImageLoader(newImageLoader())
     }

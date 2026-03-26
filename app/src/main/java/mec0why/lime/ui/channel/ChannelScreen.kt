@@ -157,6 +157,22 @@ fun ChannelScreen(
 
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("LimeSettings", Context.MODE_PRIVATE)
+
+    var artBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val avatarUrl = channel?.user?.profilePic
+
+    LaunchedEffect(avatarUrl) {
+        if (avatarUrl != null) {
+            val request = coil.request.ImageRequest.Builder(context)
+                .data(avatarUrl)
+                .allowHardware(false)
+                .build()
+            val result = coil.Coil.imageLoader(context).execute(request)
+            if (result is coil.request.SuccessResult) {
+                artBitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            }
+        }
+    }
     
     val ivsPlayer = remember {
         Player.Factory.create(context).apply {
@@ -381,7 +397,7 @@ fun ChannelScreen(
         }
     }
 
-    LaunchedEffect(isPlaying, isBuffering, channel) {
+    LaunchedEffect(isPlaying, isBuffering, channel, artBitmap) {
         if (!isClosing) {
             val playbackState = if (isPlaying) PlaybackState.STATE_PLAYING 
                 else if (isBuffering) PlaybackState.STATE_BUFFERING 
@@ -420,15 +436,20 @@ fun ChannelScreen(
             val title = channel?.livestream?.sessionTitle ?: "Live"
             val artist = channel?.user?.username ?: "Lime Stream"
             
-            mediaSession.setMetadata(
-                MediaMetadata.Builder()
-                    .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                    .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                    .build()
-            )
+            val metadataBuilder = MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
+                
+            artBitmap?.let {
+                metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
+                metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, it)
+            }
+            
+            mediaSession.setMetadata(metadataBuilder.build())
             
             val notification = Notification.Builder(context, channelId)
                 .setSmallIcon(context.applicationInfo.icon)
+                .setLargeIcon(artBitmap)
                 .setContentTitle(title)
                 .setContentText(artist)
                 .setOngoing(isPlaying)

@@ -22,7 +22,9 @@ data class Livestream(
     @SerialName("started_at") val startedAt: String = "",
     @SerialName("stream_title") val streamTitle: String = "",
     val thumbnail: String = "",
-    @SerialName("viewer_count") val viewerCount: Int = 0
+    @SerialName("viewer_count") val viewerCount: Int = 0,
+    val username: String? = null,
+    val verified: Boolean = false
 )
 
 @Serializable

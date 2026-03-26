@@ -30,23 +30,25 @@ class FollowingViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             followingRepository.followedChannels.collect { slugs ->
-                loadFollowedChannels(slugs)
+                loadFollowedChannels(slugs, showLoading = true)
             }
         }
     }
 
-    fun refresh() {
+    fun refresh(showLoading: Boolean = true) {
         val slugs = followingRepository.followedChannels.value
-        loadFollowedChannels(slugs)
+        loadFollowedChannels(slugs, showLoading)
     }
 
-    private fun loadFollowedChannels(slugs: Set<String>) {
+    private fun loadFollowedChannels(slugs: Set<String>, showLoading: Boolean = true) {
         if (slugs.isEmpty()) {
             _followedChannels.value = emptyList()
             return
         }
         viewModelScope.launch {
-            _isLoading.value = true
+            if (showLoading) {
+                _isLoading.value = true
+            }
             _error.value = null
             try {
                 val results = slugs.map { slug ->

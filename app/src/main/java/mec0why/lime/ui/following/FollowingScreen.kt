@@ -52,7 +52,7 @@ fun FollowingScreen(
     val error by viewModel.error.collectAsState()
 
     LaunchedEffect(Unit) {
-        viewModel.refresh()
+        viewModel.refresh(showLoading = false)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -68,7 +68,7 @@ fun FollowingScreen(
 
         PullToRefreshBox(
             isRefreshing = isLoading && channels.isNotEmpty(),
-            onRefresh = viewModel::refresh,
+            onRefresh = { viewModel.refresh(showLoading = true) },
             modifier = Modifier.weight(1f)
         ) {
             when {
