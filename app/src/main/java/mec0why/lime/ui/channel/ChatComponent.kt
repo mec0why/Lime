@@ -87,15 +87,22 @@ fun ChatSection(
     var unreadCount by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { index ->
-                if (index > 0) {
-                    userPausedScroll = true
-                } else {
-                    userPausedScroll = false
-                    unreadCount = 0
-                }
+        snapshotFlow { 
+            Triple(
+                listState.firstVisibleItemIndex, 
+                listState.firstVisibleItemScrollOffset, 
+                listState.isScrollInProgress
+            ) 
+        }.collect { (index, offset, isScrolling) ->
+            val isScrolledUp = index > 0 || offset > 15
+            
+            if (isScrolling && isScrolledUp) {
+                userPausedScroll = true
+            } else if (!isScrolledUp) {
+                userPausedScroll = false
+                unreadCount = 0
             }
+        }
     }
 
     LaunchedEffect(messages) {

@@ -13,7 +13,7 @@ interface KickApi {
     @GET("public/v1/livestreams")
     suspend fun getLivestreams(
         @Query("page") page: Int = 1,
-        @Query("limit") limit: Int = 25,
+        @Query("limit") limit: Int = 100,
         @Query("sort") sort: String = "viewer_count"
     ): LivestreamResponse
 

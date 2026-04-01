@@ -54,7 +54,10 @@ class FollowingViewModel(application: Application) : AndroidViewModel(applicatio
                 val results = slugs.map { slug ->
                     async { kickRepository.getChannel(slug).getOrNull() }
                 }.awaitAll().filterNotNull()
-                _followedChannels.value = results.sortedByDescending { it.livestream != null }
+                _followedChannels.value = results.sortedWith(
+                    compareByDescending<ChannelResponse> { it.livestream != null }
+                        .thenByDescending { it.livestream?.viewerCount ?: 0 }
+                )
             } catch (_: Exception) {
                 _error.value = "Failed to load followed channels"
             } finally {

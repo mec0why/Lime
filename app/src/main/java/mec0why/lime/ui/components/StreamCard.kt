@@ -95,7 +95,6 @@ fun StreamCard(
             .data(state.profilePicture.ifEmpty { null })
             .diskCacheKey("${state.profilePicture}_$cacheBuster")
             .memoryCacheKey("${state.profilePicture}_$cacheBuster")
-            .crossfade(true)
             .build()
     }
 

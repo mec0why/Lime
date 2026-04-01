@@ -4,4 +4,10 @@
     <style name="Theme.Lime" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+
+    <style name="Theme.Lime.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#030303</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_round</item>
+        <item name="postSplashScreenTheme">@style/Theme.Lime</item>
+    </style>
 </resources>

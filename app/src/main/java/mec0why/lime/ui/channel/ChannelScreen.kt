@@ -1,21 +1,12 @@
 package mec0why.lime.ui.channel
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.PictureInPictureParams
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.graphics.drawable.Icon
-import android.media.MediaMetadata
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.os.Build
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -23,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -40,15 +32,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
@@ -77,19 +71,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.amazonaws.ivs.player.Cue
 import com.amazonaws.ivs.player.Player
 import com.amazonaws.ivs.player.PlayerException
@@ -113,8 +112,10 @@ private fun formatViewersCount(count: Int): String = when {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelScreen(
+    viewModel: ChannelViewModel = viewModel(),
+    isSurfaceOwner: Boolean = true,
     onBack: () -> Unit,
-    viewModel: ChannelViewModel = viewModel()
+    onClose: () -> Unit
 ) {
     val channel by viewModel.channel.collectAsState()
     val playbackUrl by viewModel.playbackUrl.collectAsState()
@@ -125,12 +126,21 @@ fun ChannelScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val activity = androidx.activity.compose.LocalActivity.current
 
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("LimeSettings", Context.MODE_PRIVATE) }
+
     var isFullscreen by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
-    var showChatOverlay by remember { mutableStateOf(true) }
-    var isClosing by remember { mutableStateOf(false) }
-    var chatWidthFraction by remember { mutableFloatStateOf(0.25f) }
+    var showChatOverlay by remember { mutableStateOf(prefs.getBoolean("showChatOverlay", true)) }
+    var chatWidthFraction by remember { mutableFloatStateOf(prefs.getFloat("chatWidthFraction", 0.25f)) }
     var isResizing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showChatOverlay, chatWidthFraction) {
+        prefs.edit()
+            .putBoolean("showChatOverlay", showChatOverlay)
+            .putFloat("chatWidthFraction", chatWidthFraction)
+            .apply()
+    }
 
     var showSettingsSheet by remember { mutableStateOf(false) }
     var availableTracks by remember { mutableStateOf(emptyList<VideoTrackInfo>()) }
@@ -155,73 +165,16 @@ fun ChannelScreen(
         }
     }
 
-    val context = LocalContext.current
-    val prefs = context.getSharedPreferences("LimeSettings", Context.MODE_PRIVATE)
-
-    var artBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    val avatarUrl = channel?.user?.profilePic
-
-    LaunchedEffect(avatarUrl) {
-        if (avatarUrl != null) {
-            val request = coil.request.ImageRequest.Builder(context)
-                .data(avatarUrl)
-                .allowHardware(false)
-                .build()
-            val result = coil.Coil.imageLoader(context).execute(request)
-            if (result is coil.request.SuccessResult) {
-                artBitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-            }
-        }
+    val playerManager = remember {
+        (context.applicationContext as mec0why.lime.LimeApp).playerManager
     }
-    
-    val ivsPlayer = remember {
-        Player.Factory.create(context).apply {
-            setLiveLowLatencyEnabled(true)
-        }
-    }
+    val ivsPlayer = playerManager.player
 
-    val mediaSession = remember {
-        MediaSession(context, "LimeChannelSession").apply {
-            setCallback(object : MediaSession.Callback() {
-                override fun onPlay() { ivsPlayer.play() }
-                override fun onPause() { ivsPlayer.pause() }
-            })
-            isActive = true
-        }
-    }
+    var mainSurface by remember { mutableStateOf<android.view.Surface?>(null) }
 
-    val mediaReceiver = remember {
-        object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    "lime.intent.action.PLAY" -> ivsPlayer.play()
-                    "lime.intent.action.PAUSE" -> ivsPlayer.pause()
-                }
-            }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            mediaSession.isActive = false
-            mediaSession.release()
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.cancel(10101)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        val filter = IntentFilter().apply {
-            addAction("lime.intent.action.PLAY")
-            addAction("lime.intent.action.PAUSE")
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        }
-        onDispose {
-            context.unregisterReceiver(mediaReceiver)
+    LaunchedEffect(isSurfaceOwner, mainSurface) {
+        if (isSurfaceOwner) {
+            mainSurface?.let { playerManager.setSurface(it) }
         }
     }
 
@@ -231,8 +184,6 @@ fun ChannelScreen(
         } else if (isFullscreen) {
             isFullscreen = false
         } else {
-            isClosing = true
-            ivsPlayer.pause()
             onBack()
         }
     }
@@ -259,7 +210,6 @@ fun ChannelScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            ivsPlayer.release()
             val window = activity?.window
             if (window != null) {
                 WindowInsetsControllerCompat(window, window.decorView)
@@ -321,7 +271,35 @@ fun ChannelScreen(
     var videoWidth by remember { mutableIntStateOf(16) }
     var videoHeight by remember { mutableIntStateOf(9) }
 
-    LaunchedEffect(ivsPlayer) {
+    DisposableEffect(ivsPlayer) {
+        val updateQualities = {
+            val qualities = ivsPlayer.qualities
+            val newTracks = mutableListOf<VideoTrackInfo>()
+            qualities.forEachIndexed { index, quality ->
+                newTracks.add(VideoTrackInfo(quality.name, index))
+            }
+            val previousTracksSize = availableTracks.size
+            availableTracks = newTracks.distinctBy { it.name }
+                .sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
+                
+            if (previousTracksSize == 0 && availableTracks.isNotEmpty()) {
+                val saved = prefs.getString("selectedQuality", "Auto") ?: "Auto"
+                if (saved != "Auto") {
+                    val quality = qualities.find { it.name == saved }
+                    if (quality != null) {
+                        ivsPlayer.quality = quality
+                        ivsPlayer.isAutoQualityMode = false
+                    }
+                }
+            }
+
+            selectedTrackName = if (ivsPlayer.isAutoQualityMode) {
+                "Auto: ${ivsPlayer.quality.name}"
+            } else {
+                ivsPlayer.quality.name
+            }
+        }
+
         val listener = object : Player.Listener() {
             override fun onStateChanged(state: Player.State) {
                 isPlaying = state == Player.State.PLAYING
@@ -333,31 +311,7 @@ fun ChannelScreen(
                 }
                 
                 if (state == Player.State.PLAYING || state == Player.State.READY) {
-                    val qualities = ivsPlayer.qualities
-                    val newTracks = mutableListOf<VideoTrackInfo>()
-                    qualities.forEachIndexed { index, quality ->
-                        newTracks.add(VideoTrackInfo(quality.name, index))
-                    }
-                    val previousTracksSize = availableTracks.size
-                    availableTracks = newTracks.distinctBy { it.name }
-                        .sortedByDescending { it.name.substringBefore("p").toIntOrNull() ?: 0 }
-                        
-                    if (previousTracksSize == 0 && availableTracks.isNotEmpty()) {
-                        val saved = prefs.getString("selectedQuality", "Auto") ?: "Auto"
-                        if (saved != "Auto") {
-                            val quality = qualities.find { it.name == saved }
-                            if (quality != null) {
-                                ivsPlayer.quality = quality
-                                ivsPlayer.isAutoQualityMode = false
-                            }
-                        }
-                    }
-
-                    selectedTrackName = if (ivsPlayer.isAutoQualityMode) {
-                        "Auto: ${ivsPlayer.quality.name}"
-                    } else {
-                        ivsPlayer.quality.name
-                    }
+                    updateQualities()
                 }
             }
 
@@ -381,6 +335,14 @@ fun ChannelScreen(
             override fun onSeekCompleted(position: Long) {}
         }
         ivsPlayer.addListener(listener)
+        
+        if (ivsPlayer.state == Player.State.PLAYING || ivsPlayer.state == Player.State.READY) {
+            updateQualities()
+        }
+
+        onDispose {
+            ivsPlayer.removeListener(listener)
+        }
     }
 
     LaunchedEffect(showControls) {
@@ -390,147 +352,140 @@ fun ChannelScreen(
         }
     }
 
+    val currentChannel by androidx.compose.runtime.rememberUpdatedState(channel)
     LaunchedEffect(playbackUrl) {
         playbackUrl?.let { url ->
-            ivsPlayer.load(url.toUri())
-            ivsPlayer.play()
+            playerManager.play(
+                url = url,
+                slug = currentChannel?.slug ?: "",
+                username = currentChannel?.user?.username ?: currentChannel?.slug,
+                verified = currentChannel?.verified ?: false
+            )
+            val serviceIntent = Intent(context, mec0why.lime.player.PlayerService::class.java).apply {
+                putExtra(mec0why.lime.player.PlayerService.EXTRA_TITLE, currentChannel?.livestream?.sessionTitle ?: "Live")
+                putExtra(mec0why.lime.player.PlayerService.EXTRA_ARTIST, currentChannel?.user?.username ?: "Lime Stream")
+                putExtra(mec0why.lime.player.PlayerService.EXTRA_AVATAR_URL, currentChannel?.user?.profilePic)
+            }
+            context.startForegroundService(serviceIntent)
         }
     }
 
-    LaunchedEffect(isPlaying, isBuffering, channel, artBitmap) {
-        if (!isClosing) {
-            val playbackState = if (isPlaying) PlaybackState.STATE_PLAYING 
-                else if (isBuffering) PlaybackState.STATE_BUFFERING 
-                else PlaybackState.STATE_PAUSED
-            
-            mediaSession.setPlaybackState(
-                PlaybackState.Builder()
-                    .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE)
-                    .setState(playbackState, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
-                    .build()
-            )
-            
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channelId = "lime_media_playback"
-            val c = NotificationChannel(channelId, "Subscribed Streams", NotificationManager.IMPORTANCE_LOW)
-            nm.createNotificationChannel(c)
-
-            val playIntent = PendingIntent.getBroadcast(
-                context, 0, Intent("lime.intent.action.PLAY").setPackage(context.packageName),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val pauseIntent = PendingIntent.getBroadcast(
-                context, 1, Intent("lime.intent.action.PAUSE").setPackage(context.packageName),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val action = if (isPlaying) {
-                Notification.Action.Builder(
-                    Icon.createWithResource(context, android.R.drawable.ic_media_pause), "Pause", pauseIntent
-                ).build()
-            } else {
-                Notification.Action.Builder(
-                    Icon.createWithResource(context, android.R.drawable.ic_media_play), "Play", playIntent
-                ).build()
-            }
-            
-            val title = channel?.livestream?.sessionTitle ?: "Live"
-            val artist = channel?.user?.username ?: "Lime Stream"
-            
-            val metadataBuilder = MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                
-            artBitmap?.let {
-                metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
-                metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, it)
-            }
-            
-            mediaSession.setMetadata(metadataBuilder.build())
-            
-            val notification = Notification.Builder(context, channelId)
-                .setSmallIcon(context.applicationInfo.icon)
-                .setLargeIcon(artBitmap)
-                .setContentTitle(title)
-                .setContentText(artist)
-                .setOngoing(isPlaying)
-                .setStyle(
-                    Notification.MediaStyle()
-                        .setMediaSession(mediaSession.sessionToken)
-                        .setShowActionsInCompactView(0)
-                )
-                .addAction(action)
-                .build()
-            nm.notify(10101, notification)
-        }
-    }
-
-    val isLive = !playbackUrl.isNullOrBlank() && channel?.livestream != null
+    val isOffline = !isLoading && channel != null && channel?.livestream == null
+    val isLive = !isOffline
 
     BoxWithConstraints(
-        modifier = Modifier.fillMaxSize().background(DarkBackground)
+        modifier = Modifier.fillMaxSize().background(Color.Black)
     ) {
         val screenWidthPx = constraints.maxWidth.toFloat()
 
         if (isInPipMode) {
             // Minimal UI, only video is visible
-        } else if (isFullscreen && !isClosing) {
-            if (showChatOverlay) {
-                val boundaryX = maxWidth * (1f - chatWidthFraction)
-                
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(48.dp)
-                        .offset(x = boundaryX - 24.dp)
-                        .zIndex(2f)
-                        .pointerInput(screenWidthPx) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { 
-                                    isResizing = true
-                                    showControls = true 
-                                },
-                                onDragEnd = { isResizing = false },
-                                onDragCancel = { isResizing = false },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    showControls = true
-                                    change.consume()
-                                    val dragFraction = dragAmount / screenWidthPx
-                                    chatWidthFraction = (chatWidthFraction - dragFraction).coerceIn(0.2f, 0.5f)
-                                }
-                            )
-                        }
-                ) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showControls || isResizing,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
-                        modifier = Modifier.align(Alignment.Center)
-                    ) {
+        } else if (isLandscape) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showChatOverlay,
+                enter = androidx.compose.animation.slideInHorizontally(
+                    animationSpec = androidx.compose.animation.core.tween(300)
+                ) { it },
+                exit = androidx.compose.animation.slideOutHorizontally(
+                    animationSpec = androidx.compose.animation.core.tween(300)
+                ) { it },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .fillMaxWidth(chatWidthFraction.coerceAtLeast(0.2f))
+                    .zIndex(2f)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    channel?.chatroom?.id?.let { chatroomId ->
                         Box(
                             modifier = Modifier
-                                .size(width = 4.dp, height = 48.dp)
-                                .background(LimeGreen, RoundedCornerShape(2.dp))
-                        )
+                                .fillMaxSize()
+                                .background(DarkBackground)
+                        ) {
+                            ChatSection(
+                                chatroomId = chatroomId,
+                                kickUserId = channel?.userId,
+                                subscriberBadges = channel?.subscriberBadges ?: emptyList(),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(vertical = 8.dp)
+                            )
+                        }
                     }
-                }
 
-                channel?.chatroom?.id?.let { chatroomId ->
+                    val view = LocalView.current
                     Box(
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .fillMaxWidth(chatWidthFraction)
                             .fillMaxHeight()
-                            .background(DarkBackground)
-                            .zIndex(1f)
+                            .width(48.dp)
+                            .offset(x = (-24).dp)
+                            .align(Alignment.CenterStart)
+                            .pointerInput(screenWidthPx) {
+                                        var hapticTriggered05 = false
+                                        var hapticTriggered02 = false
+
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { 
+                                                isResizing = true
+                                                showControls = true 
+                                                hapticTriggered05 = chatWidthFraction >= 0.5f
+                                                hapticTriggered02 = chatWidthFraction <= 0.2f
+                                            },
+                                            onDragEnd = { 
+                                                isResizing = false
+                                                if (chatWidthFraction <= 0.12f) {
+                                                    showChatOverlay = false
+                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                } else if (chatWidthFraction < 0.2f) {
+                                                    chatWidthFraction = 0.2f
+                                                    if (!hapticTriggered02) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                    }
+                                                }
+                                            },
+                                            onDragCancel = { isResizing = false },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                if (!showChatOverlay) return@detectHorizontalDragGestures
+                                                showControls = true
+                                                change.consume()
+                                                val dragFraction = dragAmount / screenWidthPx
+                                                val oldFraction = chatWidthFraction
+                                                val newFraction = (chatWidthFraction - dragFraction).coerceIn(0.0f, 0.5f)
+                                                
+                                                if (newFraction != oldFraction) {
+                                                    if (newFraction >= 0.5f && !hapticTriggered05) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                        hapticTriggered05 = true
+                                                    } else if (newFraction < 0.5f) {
+                                                        hapticTriggered05 = false
+                                                    }
+
+                                                    if (newFraction <= 0.2f && !hapticTriggered02 && oldFraction > 0.2f) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                        hapticTriggered02 = true
+                                                    } else if (newFraction > 0.21f) {
+                                                        hapticTriggered02 = false
+                                                    }
+
+                                                    chatWidthFraction = newFraction
+                                                }
+                                            }
+                                        )
+                            }
                     ) {
-                        ChatSection(
-                            chatroomId = chatroomId,
-                            kickUserId = channel?.userId,
-                            subscriberBadges = channel?.subscriberBadges ?: emptyList(),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(vertical = 8.dp)
-                        )
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = showControls || isResizing,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            val indicatorColor = if (isResizing && chatWidthFraction <= 0.12f) Color.Red else LimeGreen
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 4.dp, height = 48.dp)
+                                    .background(indicatorColor, RoundedCornerShape(2.dp))
+                            )
+                        }
                     }
                 }
             }
@@ -576,17 +531,29 @@ fun ChannelScreen(
             }
         }
 
+        val videoWidthSpec = if (isResizing) {
+            androidx.compose.animation.core.snap<Float>()
+        } else {
+            androidx.compose.animation.core.tween<Float>(300)
+        }
+
+        val animatedVideoWidth by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (showChatOverlay) 1f - chatWidthFraction.coerceAtLeast(0.2f) else 1f,
+            animationSpec = videoWidthSpec,
+            label = "videoWidth"
+        )
+
         val videoLayerModifier = if (isInPipMode) {
             Modifier
                 .align(Alignment.Center)
                 .fillMaxSize()
                 .background(Color.Black)
                 .zIndex(3f)
-        } else if (isFullscreen && !isClosing) {
+        } else if (isLandscape) {
             Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
-                .fillMaxWidth(if (showChatOverlay) 1f - chatWidthFraction else 1f)
+                .fillMaxWidth(animatedVideoWidth)
                 .background(Color.Black)
                 .zIndex(0f)
         } else {
@@ -599,17 +566,45 @@ fun ChannelScreen(
                 .zIndex(3f)
         }
 
+        var videoViewBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
+
         Box(
             modifier = videoLayerModifier
+                .onGloballyPositioned { coordinates ->
+                    val pos = coordinates.positionInWindow()
+                    val size = coordinates.size
+                    videoViewBounds = android.graphics.Rect(
+                        pos.x.toInt(),
+                        pos.y.toInt(),
+                        (pos.x + size.width).toInt(),
+                        (pos.y + size.height).toInt()
+                    )
+                }
                 .pointerInput(Unit) {
                     if (!isInPipMode) {
                         detectTapGestures { showControls = !showControls }
                     }
                 }
+                .pointerInput(isFullscreen) {
+                    if (!isInPipMode) {
+                        var totalDrag = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { _ -> totalDrag = 0f },
+                            onDragEnd = {
+                                when {
+                                    totalDrag < -50f && !isFullscreen -> isFullscreen = true
+                                    totalDrag > 50f && isFullscreen -> isFullscreen = false
+                                    totalDrag > 50f && !isFullscreen -> onBack()
+                                }
+                            },
+                            onVerticalDrag = { _, dragAmount ->
+                                totalDrag += dragAmount
+                            }
+                        )
+                    }
+                }
         ) {
-            if (isClosing) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
-            } else if (isLive) {
+            if (isLive) {
                 BoxWithConstraints(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -620,20 +615,28 @@ fun ChannelScreen(
                     
                     AndroidView(
                         factory = { ctx ->
-                            android.view.SurfaceView(ctx).apply {
+                            android.view.TextureView(ctx).apply {
                                 layoutParams = android.view.ViewGroup.LayoutParams(
                                     android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                     android.view.ViewGroup.LayoutParams.MATCH_PARENT
                                 )
-                                holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                                    override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                                        ivsPlayer.setSurface(holder.surface)
+                                surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                                    override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, width: Int, height: Int) {
+                                        val surface = android.view.Surface(st)
+                                        mainSurface = surface
+                                        if (isSurfaceOwner) playerManager.setSurface(surface)
                                     }
-                                    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, w: Int, h: Int) {}
-                                    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
-                                        ivsPlayer.setSurface(null)
+                                    override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, width: Int, height: Int) {}
+                                    override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
+                                        mainSurface?.let {
+                                            playerManager.clearSurface(it)
+                                            it.release()
+                                        }
+                                        mainSurface = null
+                                        return true
                                     }
-                                })
+                                    override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
+                                }
                             }
                         },
                         modifier = Modifier
@@ -661,72 +664,82 @@ fun ChannelScreen(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = {
-                                    if (isFullscreen) isFullscreen = false else {
-                                        isClosing = true
-                                        ivsPlayer.pause()
-                                        onBack()
-                                    }
+                            if (!isLandscape) {
+                                IconButton(
+                                    onClick = onBack
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "Minimize",
+                                        tint = Color.White
+                                    )
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color.White
-                                )
                             }
 
-                            if (isFullscreen) {
+                            if (isLandscape) {
                                 channel?.livestream?.let { live ->
-                                    Column(
+                                    Row(
                                         modifier = Modifier
-                                            .padding(start = 8.dp, end = 120.dp)
-                                            .weight(1f, fill = false)
+                                            .padding(start = 8.dp, end = 56.dp)
+                                            .weight(1f, fill = false),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Text(
-                                            text = live.sessionTitle,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        AsyncImage(
+                                            model = channel?.user?.profilePic,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(CircleShape)
                                         )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        Column(
+                                            modifier = Modifier.weight(1f, fill = false)
                                         ) {
                                             Text(
-                                                text = channel?.user?.username ?: "",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = Color.White.copy(alpha = 0.8f),
+                                                text = live.sessionTitle,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = Color.White,
                                                 maxLines = 1,
                                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                             )
-                                            if (channel?.verified == true) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(14.dp)
-                                                        .background(LimeGreen, androidx.compose.foundation.shape.CircleShape),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = "✓",
-                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                                        color = Color.Black
-                                                    )
-                                                }
-                                            }
-                                            if (live.categories.isNotEmpty()) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
                                                 Text(
-                                                    text = live.categories.first().name,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Color.White,
-                                                    modifier = Modifier
-                                                        .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                    text = channel?.user?.username ?: "",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = Color.White.copy(alpha = 0.8f),
                                                     maxLines = 1,
                                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                                 )
+                                                if (channel?.verified == true) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(14.dp)
+                                                            .background(LimeGreen, androidx.compose.foundation.shape.CircleShape),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = "✓",
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                                            color = Color.Black
+                                                        )
+                                                    }
+                                                }
+                                                if (live.categories.isNotEmpty()) {
+                                                    Text(
+                                                        text = live.categories.first().name,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = Color.White,
+                                                        modifier = Modifier
+                                                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                        maxLines = 1,
+                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -737,7 +750,7 @@ fun ChannelScreen(
                         if (!isBuffering) {
                             IconButton(
                                 onClick = {
-                                    if (isPlaying) ivsPlayer.pause() else ivsPlayer.play()
+                                    if (isPlaying) playerManager.userPause() else playerManager.userPlay()
                                 },
                                 modifier = Modifier.align(Alignment.Center)
                             ) {
@@ -770,7 +783,7 @@ fun ChannelScreen(
 
                         Row(
                             modifier = Modifier
-                                .align(if (isFullscreen) Alignment.BottomStart else Alignment.BottomStart)
+                                .align(Alignment.BottomStart)
                                 .padding(8.dp)
                                 .padding(start = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -811,9 +824,14 @@ fun ChannelScreen(
                                 )
                             }
 
-                            if (isFullscreen) {
+                            if (isLandscape) {
                                 IconButton(
-                                    onClick = { showChatOverlay = !showChatOverlay }
+                                    onClick = { 
+                                        if (!showChatOverlay && chatWidthFraction < 0.2f) {
+                                            chatWidthFraction = 0.25f
+                                        }
+                                        showChatOverlay = !showChatOverlay 
+                                    }
                                 ) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Chat,
@@ -825,10 +843,12 @@ fun ChannelScreen(
 
                             IconButton(
                                 onClick = {
-                                    val params = PictureInPictureParams.Builder()
+                                    val builder = PictureInPictureParams.Builder()
                                         .setAspectRatio(android.util.Rational(16, 9))
-                                        .build()
-                                    activity?.enterPictureInPictureMode(params)
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && videoViewBounds != null) {
+                                        builder.setSourceRectHint(videoViewBounds)
+                                    }
+                                    activity?.enterPictureInPictureMode(builder.build())
                                 }
                             ) {
                                 Icon(
@@ -842,7 +862,7 @@ fun ChannelScreen(
                                 onClick = { isFullscreen = !isFullscreen }
                             ) {
                                 Icon(
-                                    imageVector = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                    imageVector = if (isLandscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                                     contentDescription = "Toggle fullscreen",
                                     tint = Color.White
                                 )
@@ -855,21 +875,20 @@ fun ChannelScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    IconButton(
-                        onClick = {
-                            isClosing = true
-                            ivsPlayer.pause()
-                            onBack()
-                        },
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
+                        IconButton(
+                            onClick = onClose
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Close stream",
+                                tint = Color.White
+                            )
+                        }
                     }
 
                     Column(
