@@ -54,6 +54,7 @@ fun SearchScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     Column(modifier = modifier.fillMaxSize()) {
         Text(
@@ -147,7 +148,10 @@ fun SearchScreen(
                     ) { channel ->
                         SearchChannelItem(
                             channel = channel,
-                            onClick = { onChannelClick(channel.slug) }
+                            onClick = {
+                                keyboardController?.hide()
+                                onChannelClick(channel.slug)
+                            }
                         )
                     }
                 }
@@ -178,9 +182,9 @@ fun SearchChannelItem(
                 .clip(CircleShape)
                 .background(DarkSurfaceVariant)
         )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -204,8 +208,8 @@ fun SearchChannelItem(
                     }
                 }
             }
-            val isLive = channel.isLive || channel.isLiveNow || channel.livestream != null || 
-                        channel.liveStream != null || channel.user?.isLive == true
+            val isLive = channel.isLive || channel.isLiveNow || channel.livestream != null ||
+                    channel.liveStream != null || channel.user?.isLive == true
             if (isLive) {
                 Text(
                     text = "● LIVE",

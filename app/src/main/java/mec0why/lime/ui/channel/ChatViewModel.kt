@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import mec0why.lime.LimeApp
+import mec0why.lime.data.api.SendMessageRequest
 import mec0why.lime.data.model.ChatMessageEvent
 import mec0why.lime.data.model.PusherEvent
 import mec0why.lime.data.model.SevenTVEmote
@@ -22,9 +23,12 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sevenTVRepository = (application as LimeApp).sevenTVRepository
+    private val authManager = (application as LimeApp).authManager
+    private val kickUserApi = (application as LimeApp).kickUserApi
 
     private val _messages = MutableStateFlow<List<ChatMessageEvent>>(emptyList())
     val messages: StateFlow<List<ChatMessageEvent>> = _messages
@@ -34,6 +38,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _userColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val userColors: StateFlow<Map<String, String>> = _userColors
+
+    val isLoggedIn: StateFlow<Boolean> = authManager.isLoggedIn
 
     private val messageBuffer = Channel<ChatMessageEvent>(Channel.UNLIMITED)
 
@@ -56,7 +62,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun flushBuffer(buffer: MutableList<ChatMessageEvent>) {
         if (buffer.isEmpty()) return
-        
+
         val colorsUpdate = mutableMapOf<String, String>()
         buffer.forEach { message ->
             message.sender?.let { sender ->
@@ -66,23 +72,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        
+
         if (colorsUpdate.isNotEmpty()) {
             val currentColors = _userColors.value.toMutableMap()
             currentColors.putAll(colorsUpdate)
             _userColors.value = currentColors
         }
-        
+
         val currentList = _messages.value.toMutableList()
         currentList.addAll(0, buffer)
-        
+
         if (currentList.size > 100) {
             val toKeep = currentList.subList(0, 100)
             _messages.value = toKeep.toList()
         } else {
             _messages.value = currentList
         }
-        
+
         buffer.clear()
     }
 
@@ -131,17 +137,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (_: Exception) {
                             pusherEvent.data.toString()
                         }
-                        
+
                         val messageEvent = json.decodeFromString<ChatMessageEvent>(dataString)
                         messageBuffer.trySend(messageEvent)
                     }
                 } catch (_: Exception) {
-                    // Ignore parse errors silently
                 }
             }
-            
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                // Ignore WebSocket failures silently
             }
         })
     }
@@ -157,6 +161,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         """.trimIndent()
         webSocket.send(jsonPayload)
+    }
+
+    fun sendMessage(broadcasterUserId: Int, content: String) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                kickUserApi.sendChatMessage(
+                    SendMessageRequest(
+                        broadcasterUserId = broadcasterUserId,
+                        content = content.trim(),
+                        type = "user"
+                    )
+                )
+            }.onFailure {
+                if (it is retrofit2.HttpException) {
+                    val errorBody = it.response()?.errorBody()?.string()
+                } else {
+                }
+            }
+        }
     }
 
     fun disconnect() {

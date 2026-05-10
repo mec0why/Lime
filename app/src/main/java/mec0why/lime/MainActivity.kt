@@ -1,5 +1,6 @@
 package mec0why.lime
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -95,6 +96,23 @@ class MainActivity : ComponentActivity() {
         setContent {
             LimeTheme {
                 LimeNavigation()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOAuthCallback(intent)
+    }
+
+    private fun handleOAuthCallback(intent: Intent) {
+        val data = intent.data ?: return
+        if (data.scheme == "https" && data.host == "mec0why.github.io" && data.path?.startsWith("/lime/callback") == true) {
+            val code = data.getQueryParameter("code") ?: return
+            val state = data.getQueryParameter("state") ?: return
+            val authManager = (applicationContext as LimeApp).authManager
+            lifecycleScope.launch {
+                authManager.exchangeCode(code, state)
             }
         }
     }

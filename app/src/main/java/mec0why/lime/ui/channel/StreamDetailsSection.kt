@@ -20,11 +20,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import mec0why.lime.data.model.ChannelResponse
-import mec0why.lime.ui.theme.DarkBackground
 import mec0why.lime.ui.theme.LimeGreen
 import mec0why.lime.ui.theme.TextPrimary
 
@@ -78,7 +78,7 @@ fun StreamDetailsSection(
                                 Text(
                                     text = "✓",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = DarkBackground
+                                    color = Color.Black
                                 )
                             }
                         }
@@ -116,8 +116,8 @@ fun StreamDetailsSection(
                 androidx.compose.material3.TextButton(
                     onClick = onFollowToggle,
                     colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = if (isFollowing) TextPrimary else DarkBackground,
-                        containerColor = if (isFollowing) DarkBackground else LimeGreen
+                        contentColor = if (isFollowing) TextPrimary else Color.Black,
+                        containerColor = if (isFollowing) Color.Black else LimeGreen
                     ),
                     modifier = Modifier.padding(start = 8.dp)
                 ) {

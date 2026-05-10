@@ -10,8 +10,10 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import kotlinx.serialization.json.Json
 import mec0why.lime.data.api.KickApi
 import mec0why.lime.data.api.KickUnofficialApi
+import mec0why.lime.data.api.KickUserApi
 import mec0why.lime.data.api.SevenTVApi
 import mec0why.lime.data.api.TokenResponse
+import mec0why.lime.data.auth.AuthManager
 import mec0why.lime.data.repository.ChannelHydrator
 import mec0why.lime.data.repository.FollowingRepository
 import mec0why.lime.data.repository.KickRepository
@@ -26,7 +28,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 
@@ -37,7 +38,10 @@ class LimeApp : Application(), ImageLoaderFactory {
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                    .header(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                    )
                     .header("Accept", "*/*")
                     .header("Referer", "https://kick.com/")
                     .build()
@@ -80,6 +84,12 @@ class LimeApp : Application(), ImageLoaderFactory {
     lateinit var playerManager: PlayerManager
         private set
 
+    lateinit var authManager: AuthManager
+        private set
+
+    lateinit var kickUserApi: KickUserApi
+        private set
+
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
@@ -116,10 +126,6 @@ class LimeApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
 
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-
         val cacheSize = (10 * 1024 * 1024).toLong()
         val cache = Cache(cacheDir, cacheSize)
 
@@ -143,7 +149,7 @@ class LimeApp : Application(), ImageLoaderFactory {
                         } else {
                             fetchToken().also { accessToken = it }
                         }
-                        
+
                         if (newToken.isNotEmpty()) {
                             return response.request.newBuilder()
                                 .header("Authorization", "Bearer $newToken")
@@ -172,7 +178,6 @@ class LimeApp : Application(), ImageLoaderFactory {
             .addNetworkInterceptor(onlineCacheInterceptor)
             .addInterceptor(authInterceptor)
             .authenticator(authenticator)
-            .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
@@ -185,7 +190,10 @@ class LimeApp : Application(), ImageLoaderFactory {
 
         val unofficialHeaderInterceptor = Interceptor { chain ->
             val request = chain.request().newBuilder()
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                )
                 .header("Accept", "application/json")
                 .header("Referer", "https://kick.com/")
                 .build()
@@ -196,7 +204,6 @@ class LimeApp : Application(), ImageLoaderFactory {
             .cache(cache)
             .addNetworkInterceptor(onlineCacheInterceptor)
             .addInterceptor(unofficialHeaderInterceptor)
-            .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
@@ -222,7 +229,35 @@ class LimeApp : Application(), ImageLoaderFactory {
         followingRepository = FollowingRepository(this)
         channelHydrator = ChannelHydrator(repository, this)
         playerManager = PlayerManager(this)
-        
+        authManager = AuthManager(this, BuildConfig.KICK_CLIENT_ID, BuildConfig.KICK_CLIENT_SECRET)
+
+        val userAuthInterceptor = Interceptor { chain ->
+            val token = authManager.getAccessToken()
+            val request = if (token != null) {
+                chain.request().newBuilder()
+                    .header("Authorization", "Bearer $token")
+                    .header("Accept", "application/json")
+                    .build()
+            } else {
+                chain.request()
+            }
+            chain.proceed(request)
+        }
+
+        val userClient = OkHttpClient.Builder()
+            .addInterceptor(userAuthInterceptor)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+
+        val userRetrofit = Retrofit.Builder()
+            .baseUrl("https://api.kick.com/")
+            .client(userClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+
+        kickUserApi = userRetrofit.create(KickUserApi::class.java)
+
         coil.Coil.setImageLoader(newImageLoader())
     }
 }

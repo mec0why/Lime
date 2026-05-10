@@ -77,16 +77,19 @@ fun FollowingScreen(
                         Text(text = error ?: "An error occurred", color = MaterialTheme.colorScheme.error)
                     }
                 }
+
                 isLoading && channels.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = LimeGreen)
                     }
                 }
+
                 channels.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(text = "You are not following any channels yet.", color = TextSecondary)
                     }
                 }
+
                 else -> {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(items = channels, key = { it.slug }) { channel ->
@@ -125,10 +128,10 @@ fun FollowingChannelItem(
                 .clip(CircleShape)
                 .background(DarkSurfaceVariant)
         )
-        
+
         Column(modifier = Modifier.weight(1f)) {
             val isLive = channel.livestream != null && channel.livestream.isLive
-            
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -154,8 +157,9 @@ fun FollowingChannelItem(
                         )
                     }
                 }
-                
-                val category = channel.livestream?.categories?.firstOrNull()?.name ?: channel.recentCategories.firstOrNull()?.name
+
+                val category =
+                    channel.livestream?.categories?.firstOrNull()?.name ?: channel.recentCategories.firstOrNull()?.name
                 if (category != null && isLive) {
                     Text(
                         text = category,
@@ -169,7 +173,7 @@ fun FollowingChannelItem(
                     )
                 }
             }
-            
+
             val title = channel.livestream?.sessionTitle
             if (!title.isNullOrEmpty()) {
                 Text(
@@ -180,7 +184,7 @@ fun FollowingChannelItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            
+
             Row(
                 modifier = Modifier.padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,

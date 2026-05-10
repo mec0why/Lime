@@ -1,6 +1,6 @@
 package mec0why.lime.ui.channel
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -8,24 +8,31 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -49,10 +57,12 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.core.graphics.toColorInt
+import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -69,6 +79,7 @@ import java.util.UUID
 @Composable
 fun ChatSection(
     chatroomId: Int,
+    broadcasterUserId: Int,
     modifier: Modifier = Modifier,
     kickUserId: Int? = null,
     subscriberBadges: List<mec0why.lime.data.model.SubscriberBadge> = emptyList(),
@@ -77,25 +88,31 @@ fun ChatSection(
     val messages by viewModel.messages.collectAsState()
     val sevenTvEmotes by viewModel.sevenTvEmotes.collectAsState()
     val userColors by viewModel.userColors.collectAsState()
+    val isLoggedIn by viewModel.isLoggedIn.collectAsState()
 
     LaunchedEffect(chatroomId, kickUserId) {
         viewModel.connect(chatroomId, kickUserId)
     }
+
+    val context = LocalContext.current
+    val authManager = remember { (context.applicationContext as mec0why.lime.LimeApp).authManager }
+
+    var messageText by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
     var userPausedScroll by remember { mutableStateOf(false) }
     var unreadCount by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(listState) {
-        snapshotFlow { 
+        snapshotFlow {
             Triple(
-                listState.firstVisibleItemIndex, 
-                listState.firstVisibleItemScrollOffset, 
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
                 listState.isScrollInProgress
-            ) 
+            )
         }.collect { (index, offset, isScrolling) ->
             val isScrolledUp = index > 0 || offset > 15
-            
+
             if (isScrolling && isScrolledUp) {
                 userPausedScroll = true
             } else if (!isScrolledUp) {
@@ -118,72 +135,88 @@ fun ChatSection(
 
     val scope = rememberCoroutineScope()
 
-    Box(modifier = modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            reverseLayout = true,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
-        ) {
-            items(messages, key = { it.id }) { message ->
-                ChatMessageItem(
-                    message = message,
-                    sevenTvEmotes = sevenTvEmotes,
-                    userColors = userColors,
-                    subscriberBadges = subscriberBadges
-                )
-            }
-        }
-
-        AnimatedVisibility(
-            visible = userPausedScroll,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f), CircleShape)
-                    .clip(CircleShape)
-                    .clickable {
-                        scope.launch {
-                            userPausedScroll = false
-                            unreadCount = 0
-                            listState.scrollToItem(0)
-                        }
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center
+    Column(modifier = modifier) {
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowDownward,
-                        contentDescription = "Scroll to bottom",
-                        tint = Color.Black,
-                        modifier = Modifier.size(20.dp)
+                items(messages, key = { it.id }) { message ->
+                    ChatMessageItem(
+                        message = message,
+                        sevenTvEmotes = sevenTvEmotes,
+                        userColors = userColors,
+                        subscriberBadges = subscriberBadges
                     )
-                    AnimatedVisibility(
-                        visible = unreadCount > 0,
-                        enter = fadeIn() + expandHorizontally(),
-                        exit = fadeOut() + shrinkHorizontally()
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = userPausedScroll,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f), CircleShape)
+                        .clip(CircleShape)
+                        .clickable {
+                            scope.launch {
+                                userPausedScroll = false
+                                unreadCount = 0
+                                listState.scrollToItem(0)
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            text = unreadCount.toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
+                        Icon(
+                            imageVector = Icons.Default.ArrowDownward,
+                            contentDescription = "Scroll to bottom",
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp)
                         )
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = unreadCount > 0,
+                            enter = fadeIn() + expandHorizontally(),
+                            exit = fadeOut() + shrinkHorizontally()
+                        ) {
+                            Text(
+                                text = unreadCount.toString(),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
         }
+
+        ChatInputBar(
+            isLoggedIn = isLoggedIn,
+            messageText = messageText,
+            onMessageChange = { messageText = it },
+            onSend = {
+                viewModel.sendMessage(broadcasterUserId, messageText)
+                messageText = ""
+            },
+            onLoginClick = {
+                val url = authManager.buildAuthUrl()
+                CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+            }
+        )
     }
 }
 
@@ -235,143 +268,245 @@ fun ChatMessageItem(
                 )
             }
         }
-        
+
         Row {
             val inlineContentMap = mutableMapOf<String, InlineTextContent>()
 
-        Text(
-            text = buildAnnotatedString {
-                message.sender?.identity?.badges?.forEach { badge ->
-                    val badgeId = "badge_${badge.type}_${UUID.randomUUID()}"
-                    appendInlineContent(badgeId, "[${badge.type}]")
-                    inlineContentMap[badgeId] = InlineTextContent(
-                        Placeholder(
-                            width = 1.3.em,
-                            height = 1.3.em,
-                            placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                        )
-                    ) {
-                        val imageUrl = when (badge.type) {
-                            "subscriber" -> {
-                                val sortedBadges = subscriberBadges.sortedByDescending { it.months }
-                                val bestBadge = sortedBadges.firstOrNull { badge.count >= it.months }
-                                bestBadge?.badgeImage?.src ?: "https://cdn.kicktalk.app/Badges/subscriber.svg"
-                            }
-                            "sub_gifter" -> {
-                                "https://cdn.kicktalk.app/Badges/subgifter1.svg"
-                            }
-                            else -> {
-                                "https://cdn.kicktalk.app/Badges/${badge.type}.svg"
-                            }
-                        }
-                        
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(imageUrl)
-                                .build(),
-                            contentDescription = badge.text,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    append(" ")
-                }
+            Text(
+                text = buildAnnotatedString {
+                    message.sender?.identity?.badges?.forEach { badge ->
+                        val badgeId = "badge_${badge.type}_${UUID.randomUUID()}"
+                        appendInlineContent(badgeId, "[${badge.type}]")
+                        inlineContentMap[badgeId] = InlineTextContent(
+                            Placeholder(
+                                width = 1.3.em,
+                                height = 1.3.em,
+                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                            )
+                        ) {
+                            val imageUrl = when (badge.type) {
+                                "subscriber" -> {
+                                    val sortedBadges = subscriberBadges.sortedByDescending { it.months }
+                                    val bestBadge = sortedBadges.firstOrNull { badge.count >= it.months }
+                                    bestBadge?.badgeImage?.src ?: "https://cdn.kicktalk.app/Badges/subscriber.svg"
+                                }
 
-                withStyle(style = SpanStyle(color = nameColor, fontWeight = FontWeight.Bold)) {
-                    append(message.sender?.username ?: "Unknown")
-                }
-                append(": ")
-                withStyle(style = SpanStyle(color = TextPrimary)) {
-                    for (token in tokens) {
-                        when (token) {
-                            is ChatToken.Text -> {
-                                append(token.text)
+                                "sub_gifter" -> {
+                                    "https://cdn.kicktalk.app/Badges/subgifter1.svg"
+                                }
+
+                                else -> {
+                                    "https://cdn.kicktalk.app/Badges/${badge.type}.svg"
+                                }
                             }
-                            is ChatToken.Mention -> {
-                                val mentionColorStr = userColors[token.username.lowercase()] ?: userColors[token.username.replace("@", "").lowercase()]
-                                val mentionColor = try {
-                                    if (!mentionColorStr.isNullOrBlank()) {
-                                        Color(mentionColorStr.toColorInt())
-                                    } else {
+
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(imageUrl)
+                                    .build(),
+                                contentDescription = badge.text,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        append(" ")
+                    }
+
+                    withStyle(style = SpanStyle(color = nameColor, fontWeight = FontWeight.Bold)) {
+                        append(message.sender?.username ?: "Unknown")
+                    }
+                    append(": ")
+                    withStyle(style = SpanStyle(color = TextPrimary)) {
+                        for (token in tokens) {
+                            when (token) {
+                                is ChatToken.Text -> {
+                                    append(token.text)
+                                }
+
+                                is ChatToken.Mention -> {
+                                    val mentionColorStr =
+                                        userColors[token.username.lowercase()] ?: userColors[token.username.replace(
+                                            "@",
+                                            ""
+                                        ).lowercase()]
+                                    val mentionColor = try {
+                                        if (!mentionColorStr.isNullOrBlank()) {
+                                            Color(mentionColorStr.toColorInt())
+                                        } else {
+                                            LimeGreen
+                                        }
+                                    } catch (_: Exception) {
                                         LimeGreen
                                     }
-                                } catch (_: Exception) {
-                                    LimeGreen
+                                    withStyle(style = SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {
+                                        append("@${token.username.replace("@", "")}")
+                                    }
                                 }
-                                withStyle(style = SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {
-                                    append("@${token.username.replace("@", "")}")
-                                }
-                            }
-                            is ChatToken.Link -> {
-                                pushLink(
-                                    androidx.compose.ui.text.LinkAnnotation.Url(
-                                        url = token.url,
-                                        styles = androidx.compose.ui.text.TextLinkStyles(
-                                            style = SpanStyle(color = TextPrimary, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+
+                                is ChatToken.Link -> {
+                                    pushLink(
+                                        androidx.compose.ui.text.LinkAnnotation.Url(
+                                            url = token.url,
+                                            styles = androidx.compose.ui.text.TextLinkStyles(
+                                                style = SpanStyle(
+                                                    color = TextPrimary,
+                                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                                                )
+                                            )
                                         )
                                     )
-                                )
-                                append(token.url)
-                                pop()
-                            }
-                            is ChatToken.KickEmote -> {
-                                val inlineId = "kick_${token.id}"
-                                appendInlineContent(inlineId, "[${token.name}]")
-                                inlineContentMap[inlineId] = InlineTextContent(
-                                    Placeholder(
-                                        width = 2.2.em,
-                                        height = 2.2.em,
-                                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                                    )
-                                ) {
-                                    val imageUrl = "https://files.kick.com/emotes/${token.id}/fullsize"
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(imageUrl)
-                                            .build(),
-                                        contentDescription = token.name,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    append(token.url)
+                                    pop()
                                 }
-                            }
-                            is ChatToken.SevenTvEmoteToken -> {
-                                val baseEmote = token.emotes.first()
-                                val file = baseEmote.data?.host?.files?.firstOrNull()
-                                val aspectRatio = if (file != null && file.height > 0) file.width.toFloat() / file.height.toFloat() else 1.0f
-                                val widthEmStr = (2.2f * aspectRatio).em
 
-                                val inlineId = "7tv_${baseEmote.id}_${UUID.randomUUID()}"
-                                appendInlineContent(inlineId, "[${baseEmote.name}]")
-                                inlineContentMap[inlineId] = InlineTextContent(
-                                    Placeholder(
-                                        width = widthEmStr,
-                                        height = 2.2.em,
-                                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                                    )
-                                ) {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        for (emote in token.emotes) {
-                                            val webpFiles = emote.data?.host?.files?.filter { it.format.equals("WEBP", ignoreCase = true) }
-                                            val bestFile = if (!webpFiles.isNullOrEmpty()) webpFiles.maxByOrNull { it.width } else emote.data?.host?.files?.maxByOrNull { it.width }
-                                            val fileUrlName = bestFile?.name ?: "4x.webp"
-                                            val imageUrl = "https://cdn.7tv.app/emote/${emote.id}/$fileUrlName"
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(imageUrl)
-                                                    .build(),
-                                                contentDescription = emote.name,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
+                                is ChatToken.KickEmote -> {
+                                    val inlineId = "kick_${token.id}"
+                                    appendInlineContent(inlineId, "[${token.name}]")
+                                    inlineContentMap[inlineId] = InlineTextContent(
+                                        Placeholder(
+                                            width = 2.2.em,
+                                            height = 2.2.em,
+                                            placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                                        )
+                                    ) {
+                                        val imageUrl = "https://files.kick.com/emotes/${token.id}/fullsize"
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(imageUrl)
+                                                .build(),
+                                            contentDescription = token.name,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+
+                                is ChatToken.SevenTvEmoteToken -> {
+                                    val baseEmote = token.emotes.first()
+                                    val file = baseEmote.data?.host?.files?.firstOrNull()
+                                    val aspectRatio =
+                                        if (file != null && file.height > 0) file.width.toFloat() / file.height.toFloat() else 1.0f
+                                    val widthEmStr = (2.2f * aspectRatio).em
+
+                                    val inlineId = "7tv_${baseEmote.id}_${UUID.randomUUID()}"
+                                    appendInlineContent(inlineId, "[${baseEmote.name}]")
+                                    inlineContentMap[inlineId] = InlineTextContent(
+                                        Placeholder(
+                                            width = widthEmStr,
+                                            height = 2.2.em,
+                                            placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                                        )
+                                    ) {
+                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            for (emote in token.emotes) {
+                                                val webpFiles = emote.data?.host?.files?.filter {
+                                                    it.format.equals(
+                                                        "WEBP",
+                                                        ignoreCase = true
+                                                    )
+                                                }
+                                                val bestFile =
+                                                    if (!webpFiles.isNullOrEmpty()) webpFiles.maxByOrNull { it.width } else emote.data?.host?.files?.maxByOrNull { it.width }
+                                                val fileUrlName = bestFile?.name ?: "4x.webp"
+                                                val imageUrl = "https://cdn.7tv.app/emote/${emote.id}/$fileUrlName"
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(imageUrl)
+                                                        .build(),
+                                                    contentDescription = emote.name,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                },
+                inlineContent = inlineContentMap,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+fun ChatInputBar(
+    isLoggedIn: Boolean,
+    messageText: String,
+    onMessageChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onLoginClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (isLoggedIn) {
+            BasicTextField(
+                value = messageText,
+                onValueChange = onMessageChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .border(
+                        1.dp,
+                        if (messageText.isNotBlank()) LimeGreen else TextSecondary.copy(alpha = 0.3f),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .background(Color.Black, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 16.dp),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                singleLine = true,
+                cursorBrush = SolidColor(LimeGreen),
+                decorationBox = { innerTextField ->
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (messageText.isEmpty()) {
+                            Text(
+                                text = "Type a message...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        innerTextField()
+                    }
                 }
-            },
-            inlineContent = inlineContentMap,
-            style = MaterialTheme.typography.bodyMedium
-        )
+            )
+            IconButton(
+                onClick = onSend,
+                enabled = messageText.isNotBlank()
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = if (messageText.isNotBlank()) LimeGreen else TextSecondary
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black)
+                    .border(1.dp, TextSecondary.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                    .clickable(onClick = onLoginClick)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "Log in to chat",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
         }
     }
 }
